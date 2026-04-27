@@ -1,0 +1,70 @@
+resources:
+  jobs:
+    ingestion_wolf:
+      name: "[${bundle.target}] Ingestion WOLF Domain"
+      
+      tags:
+        domain: "wolf"
+        environment: "${bundle.target}"
+        framework: "sqlserver-api-ingestion"
+      
+      job_clusters:
+        - job_cluster_key: "ingestion_cluster"
+          new_cluster:
+            spark_version: "14.3.x-scala2.12"
+            node_type_id: "Standard_DS3_v2"
+            num_workers: 2
+            spark_conf:
+              spark.databricks.delta.preview.enabled: "true"
+              spark.databricks.delta.optimizeWrite.enabled: "true"
+              spark.databricks.delta.autoCompact.enabled: "true"
+      
+      tasks:
+        - task_key: "ingest_sqlserver_wolf"
+          job_cluster_key: "ingestion_cluster"
+          notebook_task:
+            notebook_path: "${workspace.file_path}/notebooks/main_ingestion"
+            base_parameters:
+              domain_name: "wolf"
+              catalog_name: "${var.catalog_name}"
+              bronze_schema: "${var.bronze_schema}"
+              adls_base_path: "${var.adls_base_path}"
+          libraries:
+            - pypi:
+                package: "pyyaml"
+            - pypi:
+                package: "requests"
+          timeout_seconds: 7200
+          max_retries: 2
+        
+        - task_key: "ingest_apis_wolf"
+          depends_on:
+            - task_key: "ingest_sqlserver_wolf"
+          job_cluster_key: "ingestion_cluster"
+          notebook_task:
+            notebook_path: "${workspace.file_path}/notebooks/main_api_ingestion"
+            base_parameters:
+              domain_name: "wolf"
+              catalog_name: "${var.catalog_name}"
+              bronze_schema: "${var.bronze_schema}"
+              adls_base_path: "${var.adls_base_path}"
+          libraries:
+            - pypi:
+                package: "pyyaml"
+            - pypi:
+                package: "requests"
+          timeout_seconds: 7200
+          max_retries: 2
+      
+      schedule:
+        quartz_cron_expression: "0 0 3 * * ?"
+        timezone_id: "Europe/Paris"
+        pause_status: "UNPAUSED"
+      
+      email_notifications:
+        on_failure:
+          - "data-engineering@yourcompany.com"
+      
+      max_concurrent_runs: 1
+      timeout_seconds: 14400
+

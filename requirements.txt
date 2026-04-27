@@ -1,0 +1,8 @@
+# Runtime dependencies
+# pyspark and delta-spark are managed by the Databricks cluster runtime
+# and should NOT be installed here; they are listed in requirements-test.txt
+# for local unit-test environments only.
+
+pyyaml>=6.0.1
+requests>=2.31.0
+

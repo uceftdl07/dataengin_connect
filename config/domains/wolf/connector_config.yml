@@ -1,0 +1,41 @@
+domain: wolf
+description: "Connecteur SQL Server pour le domaine WOLF"
+
+connector:
+  type: "sqlserver"
+  
+  secret_scope: "sqlserver-wolf"
+  
+  secret_keys:
+    hostname: "hostname"
+    port: "port"
+    database: "database"
+    username: "username"
+    password: "password"
+  
+  jdbc_options:
+    driver: "com.microsoft.sqlserver.jdbc.SQLServerDriver"
+    encrypt: "true"
+    trustServerCertificate: "false"
+    loginTimeout: "30"
+    fetchsize: "10000"
+    batchsize: "10000"
+    isolationLevel: "READ_UNCOMMITTED"
+    applicationName: "Databricks-Ingestion-WOLF"
+  
+  connection_pool:
+    enabled: true
+    max_pool_size: 10
+    min_pool_size: 2
+    connection_timeout_seconds: 30
+
+api_secrets:
+  analytics_api:
+    secret_scope: "api-wolf-analytics_api"
+    secret_keys:
+      bearer_token: "bearer_token"
+  
+  reporting_api:
+    secret_scope: "api-wolf-reporting_api"
+    secret_keys:
+      api_key: "api_key"

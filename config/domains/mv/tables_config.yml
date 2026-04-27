@@ -1,0 +1,133 @@
+domain: mv
+description: "Domaine MV - Tables transactionnelles et référentiels"
+
+tables:
+  - table_name: "dbo.nav_ais_analysis_recent"
+    target_table: "nav_ais_analysis_recent"
+    load_mode: "full"
+    enabled: true
+    description: "Table des clients - référentiel"
+    
+    write_mode: "unity_catalog"
+    adls_path: "abfss://navigare@stadlk2srciasp.dfs.core.windows.net/RAW/marine_vessels/nav_ais_analysis_recent/IN"
+    
+    partition_by: null
+    
+    read_options:
+      numPartitions: 4
+      fetchsize: 10000
+      sessionInitStatement: "SET NOCOUNT ON"
+  
+  - table_name: "dbo.Orders"
+    target_table: "orders"
+    load_mode: "incremental"
+    enabled: true
+    description: "Table des commandes - transactionnel"
+    
+    incremental_column: "OrderDate"
+    incremental_type: "timestamp"
+    
+    write_mode: "unity_catalog"
+    adls_path: "orders/incremental"
+    
+    partition_by:
+      - "order_year"
+      - "order_month"
+    
+    derived_columns:
+      order_year: "year(OrderDate)"
+      order_month: "month(OrderDate)"
+    
+    read_options:
+      numPartitions: 8
+      fetchsize: 50000
+      partitionColumn: "OrderID"
+      lowerBound: "1"
+      upperBound: "10000000"
+  
+  - table_name: "dbo.OrderDetails"
+    target_table: "order_details"
+    load_mode: "incremental"
+    enabled: true
+    description: "Détails des commandes"
+    
+    incremental_column: "ModifiedDate"
+    incremental_type: "timestamp"
+    merge_key: "OrderDetailID"
+    
+    write_mode: "both"
+    adls_path: "order_details/incremental"
+    
+    partition_by:
+      - "detail_date"
+    
+    derived_columns:
+      detail_date: "cast(ModifiedDate as date)"
+    
+    read_options:
+      numPartitions: 4
+      fetchsize: 20000
+  
+  - table_name: "dbo.Products"
+    target_table: "products"
+    load_mode: "full"
+    enabled: true
+    description: "Catalogue produits actifs"
+    
+    filter_query: "IsActive = 1 AND DeletedDate IS NULL"
+    
+    write_mode: "unity_catalog"
+    adls_path: "products/full"
+    
+    partition_by: null
+    
+    read_options:
+      numPartitions: 2
+      fetchsize: 5000
+  
+  - table_name: "warehouse.Inventory"
+    target_table: "inventory"
+    load_mode: "incremental"
+    enabled: true
+    description: "Stocks en temps quasi-réel"
+    
+    incremental_column: "LastUpdateTimestamp"
+    incremental_type: "timestamp"
+    merge_key: 
+      - "WarehouseID"
+      - "ProductID"
+    
+    write_mode: "unity_catalog"
+    adls_path: "inventory/incremental"
+    
+    partition_by:
+      - "warehouse_id"
+    
+    derived_columns:
+      warehouse_id: "WarehouseID"
+    
+    read_options:
+      numPartitions: 6
+      fetchsize: 30000
+      partitionColumn: "InventoryID"
+      lowerBound: "1"
+      upperBound: "5000000"
+
+global_options:
+  add_metadata_columns: true
+  metadata_columns:
+    - name: "_ingestion_timestamp"
+      type: "timestamp"
+      expression: "current_timestamp()"
+    - name: "_source_domain"
+      type: "string"
+      expression: "'mv'"
+  
+  delta_options:
+    optimizeWrite: true
+    autoCompact: true
+  
+  error_handling:
+    max_retries: 3
+    retry_delay_seconds: 60
+    on_error: "fail"

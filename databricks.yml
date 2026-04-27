@@ -1,0 +1,52 @@
+bundle:
+  name: sqlserver-api-ingestion-framework
+
+variables:
+  catalog_name:
+    description: "Unity Catalog catalog name"
+    default: "bronze"
+  
+  bronze_schema:
+    description: "Bronze layer schema"
+    default: "raw"
+  
+  adls_base_path:
+    description: "Base path for ADLS storage"
+    default: "abfss://bronze@yourstorageaccount.dfs.core.windows.net"
+
+include:
+  - resources/jobs_mv.yml
+  - resources/jobs_wolf.yml
+  - resources/jobs_all_domains.yml
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://adb-1234567890123456.7.azuredatabricks.net
+    
+    variables:
+      catalog_name: "dev_bronze"
+      bronze_schema: "raw_dev"
+      adls_base_path: "abfss://bronze-dev@yourstorageaccount.dfs.core.windows.net"
+
+  staging:
+    mode: development
+    workspace:
+      host: https://adb-1234567890123456.7.azuredatabricks.net
+    
+    variables:
+      catalog_name: "staging_bronze"
+      bronze_schema: "raw_staging"
+      adls_base_path: "abfss://bronze-staging@yourstorageaccount.dfs.core.windows.net"
+
+  prod:
+    mode: production
+    workspace:
+      host: https://adb-9876543210987654.7.azuredatabricks.net
+    
+    variables:
+      catalog_name: "bronze"
+      bronze_schema: "raw"
+      adls_base_path: "abfss://bronze@yourstorageaccount.dfs.core.windows.net"

@@ -1,0 +1,92 @@
+domain: wolf
+description: "Domaine WOLF - Tables analytiques et KPIs"
+
+tables:
+  - table_name: "analytics.Sales"
+    target_table: "sales"
+    load_mode: "incremental"
+    enabled: true
+    description: "Ventes agrégées par jour"
+    
+    incremental_column: "SaleDate"
+    incremental_type: "date"
+    
+    write_mode: "unity_catalog"
+    adls_path: "sales/incremental"
+    
+    partition_by:
+      - "sale_year"
+      - "sale_month"
+    
+    derived_columns:
+      sale_year: "year(SaleDate)"
+      sale_month: "month(SaleDate)"
+    
+    read_options:
+      numPartitions: 6
+      fetchsize: 20000
+      partitionColumn: "SaleID"
+      lowerBound: "1"
+      upperBound: "50000000"
+  
+  - table_name: "reporting.DailyKPIs"
+    target_table: "daily_kpis"
+    load_mode: "full"
+    enabled: true
+    description: "KPIs quotidiens recalculés"
+    
+    write_mode: "unity_catalog"
+    adls_path: "kpis/full"
+    
+    partition_by:
+      - "report_date"
+    
+    derived_columns:
+      report_date: "cast(KPIDate as date)"
+    
+    read_options:
+      numPartitions: 2
+      fetchsize: 5000
+  
+  - table_name: "logs.UserActivity"
+    target_table: "user_activity"
+    load_mode: "incremental"
+    enabled: true
+    description: "Logs d'activité utilisateurs"
+    
+    incremental_column: "ActivityTimestamp"
+    incremental_type: "timestamp"
+    
+    filter_query: "ActivityType IN ('LOGIN', 'TRANSACTION', 'LOGOUT')"
+    
+    write_mode: "both"
+    adls_path: "user_activity/incremental"
+    
+    partition_by:
+      - "activity_date"
+    
+    derived_columns:
+      activity_date: "cast(ActivityTimestamp as date)"
+    
+    read_options:
+      numPartitions: 8
+      fetchsize: 50000
+
+global_options:
+  add_metadata_columns: true
+  metadata_columns:
+    - name: "_ingestion_timestamp"
+      type: "timestamp"
+      expression: "current_timestamp()"
+    - name: "_source_domain"
+      type: "string"
+      expression: "'wolf'"
+  
+  delta_options:
+    optimizeWrite: true
+    autoCompact: true
+  
+  error_handling:
+    max_retries: 3
+    retry_delay_seconds: 60
+    on_error: "fail"

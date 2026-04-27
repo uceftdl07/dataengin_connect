@@ -1,0 +1,21 @@
+# Testing dependencies
+pytest==7.4.3
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+pytest-xdist==3.5.0  # Parallel test execution
+
+# Mocking and fixtures
+responses==0.24.1  # Mock HTTP requests
+freezegun==1.4.0   # Mock datetime
+
+# Data validation
+pyspark==3.5.0
+delta-spark==3.0.0
+pyyaml==6.0.1
+requests==2.31.0
+
+# Code quality
+black==23.12.1
+flake8==7.0.0
+mypy==1.8.0
+isort==5.13.2

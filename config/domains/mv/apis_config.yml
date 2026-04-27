@@ -1,0 +1,191 @@
+domain: mv
+description: "Domaine MV - APIs externes"
+
+apis:
+  - api_name: "customer_api"
+    target_table: "api_customers"
+    enabled: true
+    description: "API externe des profils clients enrichis"
+    
+    base_url: "https://api.customer-platform.com/v2"
+    endpoint: "/customers"
+    http_method: "GET"
+    
+    auth_type: "oauth2_client_credentials"
+    auth_config:
+      token_url: "https://auth.customer-platform.com/oauth/token"
+      scope: "read:customers"
+    
+    pagination:
+      type: "offset"
+      page_size: 100
+      page_size_param: "limit"
+      offset_param: "offset"
+      max_pages: null
+    
+    query_params:
+      status: "active"
+      include_metadata: "true"
+    
+    headers:
+      Accept: "application/json"
+      User-Agent: "Databricks-Ingestion/1.0"
+    
+    rate_limit:
+      requests_per_second: 10
+      burst: 20
+    
+    retry_config:
+      max_retries: 3
+      retry_delay_seconds: 5
+      backoff_factor: 2
+      retry_on_status:
+        - 429
+        - 500
+        - 502
+        - 503
+        - 504
+    
+    timeout_seconds: 30
+    
+    response_path: "data.customers"
+    total_count_path: "meta.total"
+    
+    load_mode: "full"
+    
+    write_mode: "unity_catalog"
+    adls_path: "api/customer_api/full"
+    
+    partition_by: null
+  
+  - api_name: "orders_api"
+    target_table: "api_orders"
+    enabled: true
+    description: "API des commandes externes"
+    
+    base_url: "https://api.orders-system.com"
+    endpoint: "/api/v1/orders"
+    http_method: "GET"
+    
+    auth_type: "bearer"
+    
+    pagination:
+      type: "cursor"
+      page_size: 200
+      page_size_param: "per_page"
+      cursor_param: "cursor"
+      cursor_response_path: "pagination.next_cursor"
+      max_pages: 500
+    
+    query_params:
+      status: "completed,shipped"
+      sort: "created_at:desc"
+    
+    headers:
+      Accept: "application/json"
+      X-API-Version: "2024-01-01"
+    
+    rate_limit:
+      requests_per_second: 5
+      burst: 10
+    
+    retry_config:
+      max_retries: 5
+      retry_delay_seconds: 10
+      backoff_factor: 2
+      retry_on_status:
+        - 429
+        - 500
+        - 503
+    
+    timeout_seconds: 60
+    
+    response_path: "orders"
+    total_count_path: "pagination.total"
+    
+    load_mode: "incremental"
+    incremental_field: "updated_at"
+    incremental_type: "timestamp"
+    merge_key: "order_id"
+    
+    write_mode: "unity_catalog"
+    adls_path: "api/orders_api/incremental"
+    
+    partition_by:
+      - "order_date"
+    
+    derived_columns:
+      order_date: "to_date(updated_at)"
+  
+  - api_name: "inventory_api"
+    target_table: "api_inventory"
+    enabled: true
+    description: "API des stocks temps réel"
+    
+    base_url: "https://inventory.warehouse-system.io"
+    endpoint: "/v3/inventory/current"
+    http_method: "GET"
+    
+    auth_type: "api_key"
+    auth_config:
+      api_key_header: "X-API-Key"
+    
+    pagination:
+      type: "offset"
+      page_size: 500
+      page_size_param: "limit"
+      offset_param: "offset"
+      max_pages: 100
+    
+    query_params:
+      warehouse_id: "all"
+      include_reserved: "true"
+    
+    headers:
+      Accept: "application/json"
+    
+    rate_limit:
+      requests_per_second: 20
+      burst: 50
+    
+    retry_config:
+      max_retries: 3
+      retry_delay_seconds: 3
+      backoff_factor: 1.5
+      retry_on_status:
+        - 429
+        - 500
+        - 502
+        - 503
+    
+    timeout_seconds: 45
+    
+    response_path: "items"
+    total_count_path: "total_items"
+    
+    load_mode: "full"
+    
+    write_mode: "both"
+    adls_path: "api/inventory_api/full"
+    
+    partition_by:
+      - "warehouse_id"
+
+global_options:
+  add_metadata_columns: true
+  metadata_columns:
+    - name: "_ingestion_timestamp"
+      type: "timestamp"
+      expression: "current_timestamp()"
+    - name: "_source_domain"
+      type: "string"
+      expression: "'mv'"
+  
+  error_handling:
+    max_retries: 3
+    on_error: "fail"
+    log_failed_requests: true
+  
+  delta_options:
+    optimizeWrite: true
+    autoCompact: true
