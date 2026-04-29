@@ -30,7 +30,7 @@ resources:
               domain_name: "mv"
               catalog_name: "${var.catalog_name}"
               bronze_schema: "${var.bronze_schema}"
-              adls_base_path: "${var.adls_base_path}"
+              adls_base_path: "${var.adls_base_path_mv}"
           libraries:
             - pypi:
                 package: "pyyaml"

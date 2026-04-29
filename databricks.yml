@@ -10,9 +10,13 @@ variables:
     description: "Bronze layer schema"
     default: "raw"
   
-  adls_base_path:
-    description: "Base path for ADLS storage"
-    default: "abfss://bronze@yourstorageaccount.dfs.core.windows.net"
+  adls_base_path_mv:
+    description: "Base path for ADLS storage - MV domain"
+    default: "abfss://mv-bronze@yourstorageaccount.dfs.core.windows.net"
+
+  adls_base_path_wolf:
+    description: "Base path for ADLS storage - WOLF domain"
+    default: "abfss://wolf-bronze@yourstorageaccount.dfs.core.windows.net"
 
 include:
   - resources/jobs_mv.yml
@@ -29,7 +33,8 @@ targets:
     variables:
       catalog_name: "dev_bronze"
       bronze_schema: "raw_dev"
-      adls_base_path: "abfss://bronze-dev@yourstorageaccount.dfs.core.windows.net"
+      adls_base_path_mv: "abfss://mv-bronze-dev@yourstorageaccount.dfs.core.windows.net"
+      adls_base_path_wolf: "abfss://wolf-bronze-dev@yourstorageaccount.dfs.core.windows.net"
 
   staging:
     mode: development
@@ -39,7 +44,8 @@ targets:
     variables:
       catalog_name: "staging_bronze"
       bronze_schema: "raw_staging"
-      adls_base_path: "abfss://bronze-staging@yourstorageaccount.dfs.core.windows.net"
+      adls_base_path_mv: "abfss://mv-bronze-staging@yourstorageaccount.dfs.core.windows.net"
+      adls_base_path_wolf: "abfss://wolf-bronze-staging@yourstorageaccount.dfs.core.windows.net"
 
   prod:
     mode: production
@@ -49,4 +55,5 @@ targets:
     variables:
       catalog_name: "bronze"
       bronze_schema: "raw"
-      adls_base_path: "abfss://bronze@yourstorageaccount.dfs.core.windows.net"
+      adls_base_path_mv: "abfss://mv-bronze@yourstorageaccount.dfs.core.windows.net"
+      adls_base_path_wolf: "abfss://wolf-bronze@yourstorageaccount.dfs.core.windows.net"
