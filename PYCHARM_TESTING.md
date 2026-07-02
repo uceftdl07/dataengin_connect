@@ -6,7 +6,7 @@ Guide pour exécuter les tests dans PyCharm IDE.
 
 ### 1. Ouvrir le Projet
 ```
-File → Open → Sélectionner: sqlserver-api-ingestion-framework/
+File → Open → Sélectionner: jdbc-ingestion-engine/
 ```
 
 ### 2. Configurer l'Interpréteur Python

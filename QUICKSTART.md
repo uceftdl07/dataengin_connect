@@ -69,7 +69,7 @@ Set all other tables to `enabled: false`.
 
 ```bash
 # Navigate to project
-cd sqlserver-api-ingestion-framework
+cd jdbc-ingestion-engine
 
 # Validate
 databricks bundle validate
@@ -78,7 +78,7 @@ databricks bundle validate
 databricks bundle deploy -t dev
 
 # Run
-databricks bundle run -t dev ingestion_mv
+databricks bundle run -t dev jdbc_ingestion
 ```
 
 ## Verify

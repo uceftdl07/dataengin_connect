@@ -1,0 +1,85 @@
+# CD — deploys the JDBC ingestion engine (Databricks Asset Bundle).
+#
+# Flow:
+#   - push to master        -> deploy to `staging` automatically
+#   - GitHub Release (tag)  -> deploy to `prod`
+#   - manual dispatch       -> deploy to the chosen target
+#
+# Auth: OAuth M2M service principal, one per environment. Each GitHub
+# Environment (staging, production) must provide:
+#   - DATABRICKS_CLIENT_ID
+#   - DATABRICKS_CLIENT_SECRET
+# The workspace host comes from the matching target in databricks.yml.
+#
+# Protect the `production` environment with required reviewers in
+# GitHub → Settings → Environments so prod deploys need manual approval.
+name: CD
+
+on:
+  push:
+    branches: [ master ]
+  release:
+    types: [ published ]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Bundle target to deploy"
+        required: true
+        default: "staging"
+        type: choice
+        options: [ dev, staging, prod ]
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ---- Staging: automatic on push to master (or manual with target=staging)
+  deploy-staging:
+    name: Deploy to staging
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'staging')
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+      - name: Deploy bundle (staging)
+        run: databricks bundle deploy -t staging
+
+  # ---- Production: on Release, or manual dispatch with target=prod.
+  # The `production` environment gate enforces manual approval.
+  deploy-prod:
+    name: Deploy to prod
+    if: >-
+      github.event_name == 'release' ||
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'prod')
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+      - name: Deploy bundle (prod)
+        run: databricks bundle deploy -t prod
+
+  # ---- Manual dev deploy (optional convenience).
+  deploy-dev:
+    name: Deploy to dev
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'dev'
+    runs-on: ubuntu-latest
+    environment: dev
+    env:
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+      - name: Deploy bundle (dev)
+        run: databricks bundle deploy -t dev

@@ -1,0 +1,68 @@
+resources:
+  jobs:
+    # -----------------------------------------------------------------------
+    # Workflow générique d'ingestion JDBC -> Databricks.
+    #
+    # Un seul job réutilisable pour TOUTES les bases JDBC : la tâche `for_each`
+    # itère sur la variable `domains` et exécute le notebook d'ingestion une
+    # fois par domaine. Le notebook lit la config du domaine
+    # (config/domains/<name>/) pour se connecter à la base JDBC et écrire, selon
+    # `write_mode`, des fichiers Parquet sur ADLS et/ou des tables Unity Catalog.
+    #
+    # Ajouter une nouvelle base JDBC = ajouter une entrée dans `domains`
+    # (databricks.yml) + le dossier de config du domaine. Aucun changement ici.
+    # -----------------------------------------------------------------------
+    jdbc_ingestion:
+      name: "[${bundle.target}] JDBC Ingestion Engine"
+
+      tags:
+        engine: "jdbc-ingestion"
+        source_type: "jdbc"
+        environment: "${bundle.target}"
+
+      job_clusters:
+        - job_cluster_key: "ingestion_cluster"
+          new_cluster:
+            spark_version: "${var.spark_version}"
+            node_type_id: "${var.node_type_id}"
+            num_workers: ${var.num_workers}
+            spark_conf:
+              spark.databricks.delta.preview.enabled: "true"
+              spark.databricks.delta.optimizeWrite.enabled: "true"
+              spark.databricks.delta.autoCompact.enabled: "true"
+
+      tasks:
+        - task_key: "ingest_jdbc_domains"
+          # Fan-out : une exécution du notebook d'ingestion par domaine JDBC.
+          for_each_task:
+            inputs: ${var.domains}
+            # Domaines indépendants -> exécution en parallèle.
+            concurrency: 2
+            task:
+              task_key: "ingest_domain"
+              job_cluster_key: "ingestion_cluster"
+              notebook_task:
+                notebook_path: "${workspace.file_path}/notebooks/main_ingestion"
+                base_parameters:
+                  domain_name: "{{input.name}}"
+                  catalog_name: "${var.catalog_name}"
+                  bronze_schema: "${var.bronze_schema}"
+                  adls_base_path: "{{input.adls_base_path}}"
+              libraries:
+                - pypi:
+                    package: "pyyaml"
+              timeout_seconds: 7200
+              max_retries: 2
+              retry_on_timeout: true
+
+      schedule:
+        quartz_cron_expression: "0 0 2 * * ?"
+        timezone_id: "Europe/Paris"
+        pause_status: "UNPAUSED"
+
+      email_notifications:
+        on_failure:
+          - "data-engineering@yourcompany.com"
+
+      max_concurrent_runs: 1
+      timeout_seconds: 28800

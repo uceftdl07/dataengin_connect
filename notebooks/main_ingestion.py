@@ -53,10 +53,10 @@ logging.basicConfig(
 logger = logging.getLogger('main_ingestion')
 
 # Add project to path
-# The bundle name is "sqlserver-api-ingestion-framework" (see databricks.yml).
+# The bundle name is "jdbc-ingestion-engine" (see databricks.yml).
 # Candidate paths are checked in order; the first existing one wins.
 _candidate_roots = [
-    "/Workspace/.bundle/sqlserver-api-ingestion-framework",          # bundle deployment root
+    "/Workspace/.bundle/jdbc-ingestion-engine",                      # bundle deployment root
     os.path.abspath(os.path.join(os.getcwd(), "..")),                # notebook one level up
     os.path.abspath(os.getcwd()),                                     # current dir
 ]

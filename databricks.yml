@@ -1,27 +1,54 @@
 bundle:
-  name: sqlserver-api-ingestion-framework
+  name: jdbc-ingestion-engine
+
+# ---------------------------------------------------------------------------
+# Moteur générique d'ingestion de sources JDBC (SQL Server et autres bases
+# JDBC) vers Databricks : écriture Parquet sur ADLS et/ou création de tables
+# Unity Catalog (Delta). Le comportement est piloté par la configuration YAML
+# de chaque domaine (config/domains/<domain>/).
+#
+# Périmètre : intégration des sources JDBC uniquement (la partie API est
+# volontairement hors périmètre de ce bundle).
+# ---------------------------------------------------------------------------
 
 variables:
   catalog_name:
-    description: "Unity Catalog catalog name"
+    description: "Unity Catalog catalog name (bronze layer)"
     default: "bronze"
-  
+
   bronze_schema:
     description: "Bronze layer schema"
     default: "raw"
-  
-  adls_base_path_mv:
-    description: "Base path for ADLS storage - MV domain"
-    default: "abfss://mv-bronze@yourstorageaccount.dfs.core.windows.net"
 
-  adls_base_path_wolf:
-    description: "Base path for ADLS storage - WOLF domain"
-    default: "abfss://wolf-bronze@yourstorageaccount.dfs.core.windows.net"
+  # ---- Cluster de travail -------------------------------------------------
+  spark_version:
+    description: "Databricks Runtime version for the ingestion cluster"
+    default: "14.3.x-scala2.12"
+
+  node_type_id:
+    description: "Worker/driver node type"
+    default: "Standard_DS3_v2"
+
+  num_workers:
+    description: "Number of workers for the ingestion cluster"
+    default: 2
+
+  # ---- Domaines JDBC à ingérer -------------------------------------------
+  # Liste générique de domaines. Chaque domaine correspond à une base de
+  # données JDBC configurée dans config/domains/<name>/. Pour brancher une
+  # nouvelle base JDBC, il suffit d'ajouter une entrée ici (+ le dossier de
+  # config du domaine) : aucun code ni aucune nouvelle tâche n'est requis.
+  domains:
+    description: "List of JDBC domains to ingest (name + ADLS base path)"
+    type: complex
+    default:
+      - name: "mv"
+        adls_base_path: "abfss://mv-bronze@yourstorageaccount.dfs.core.windows.net"
+      - name: "wolf"
+        adls_base_path: "abfss://wolf-bronze@yourstorageaccount.dfs.core.windows.net"
 
 include:
-  - resources/jobs_mv.yml
-  - resources/jobs_wolf.yml
-  - resources/jobs_all_domains.yml
+  - resources/*.yml
 
 targets:
   dev:
@@ -29,31 +56,39 @@ targets:
     default: true
     workspace:
       host: https://adb-1234567890123456.7.azuredatabricks.net
-    
     variables:
       catalog_name: "dev_bronze"
       bronze_schema: "raw_dev"
-      adls_base_path_mv: "abfss://mv-bronze-dev@yourstorageaccount.dfs.core.windows.net"
-      adls_base_path_wolf: "abfss://wolf-bronze-dev@yourstorageaccount.dfs.core.windows.net"
+      domains:
+        - name: "mv"
+          adls_base_path: "abfss://mv-bronze-dev@yourstorageaccount.dfs.core.windows.net"
+        - name: "wolf"
+          adls_base_path: "abfss://wolf-bronze-dev@yourstorageaccount.dfs.core.windows.net"
 
   staging:
     mode: development
     workspace:
       host: https://adb-1234567890123456.7.azuredatabricks.net
-    
     variables:
       catalog_name: "staging_bronze"
       bronze_schema: "raw_staging"
-      adls_base_path_mv: "abfss://mv-bronze-staging@yourstorageaccount.dfs.core.windows.net"
-      adls_base_path_wolf: "abfss://wolf-bronze-staging@yourstorageaccount.dfs.core.windows.net"
+      domains:
+        - name: "mv"
+          adls_base_path: "abfss://mv-bronze-staging@yourstorageaccount.dfs.core.windows.net"
+        - name: "wolf"
+          adls_base_path: "abfss://wolf-bronze-staging@yourstorageaccount.dfs.core.windows.net"
 
   prod:
     mode: production
     workspace:
       host: https://adb-9876543210987654.7.azuredatabricks.net
-    
     variables:
       catalog_name: "bronze"
       bronze_schema: "raw"
-      adls_base_path_mv: "abfss://mv-bronze@yourstorageaccount.dfs.core.windows.net"
-      adls_base_path_wolf: "abfss://wolf-bronze@yourstorageaccount.dfs.core.windows.net"
+      num_workers: 4
+      node_type_id: "Standard_DS4_v2"
+      domains:
+        - name: "mv"
+          adls_base_path: "abfss://mv-bronze@yourstorageaccount.dfs.core.windows.net"
+        - name: "wolf"
+          adls_base_path: "abfss://wolf-bronze@yourstorageaccount.dfs.core.windows.net"

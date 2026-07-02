@@ -98,11 +98,9 @@ Zero code required to add a new source — everything is driven by YAML configur
 
 ```
 MTE_Engine/
-├── databricks.yml                      # Asset Bundle — name & environments
+├── databricks.yml                      # Asset Bundle — name, `domains` list & environments
 ├── resources/
-│   ├── jobs_mv.yml                     # MV job only
-│   ├── jobs_wolf.yml                   # WOLF job only
-│   └── jobs_all_domains.yml            # Cross-domain orchestration job
+│   └── jdbc_ingestion.job.yml          # Generic JDBC ingestion job (for_each over domains)
 ├── config/
 │   └── domains/
 │       ├── mv/
@@ -206,7 +204,7 @@ Edit `databricks.yml`:
 
 ```yaml
 bundle:
-  name: sqlserver-api-ingestion-framework
+  name: jdbc-ingestion-engine
 
 targets:
   dev:
@@ -219,7 +217,7 @@ targets:
 ```bash
 databricks bundle validate
 databricks bundle deploy -t dev
-databricks bundle run   -t dev ingestion_mv
+databricks bundle run   -t dev jdbc_ingestion
 ```
 
 ---
@@ -464,53 +462,103 @@ databricks bundle deploy -t staging
 databricks bundle deploy -t prod
 ```
 
-> **Important**: splitting files in `resources/` improves organization, but it does **not** change deployment granularity. A Databricks Asset Bundle deploys **all included resources** from `resources/*.yml`. If you want true **domain-only deployment**, you need separate bundles (for example one bundle for `mv` and one for `wolf`) or separate bundle roots in CI/CD.
+> **Note**: a Databricks Asset Bundle deploys **all included resources** from `resources/*.yml`. This engine ships a **single generic job** (`jdbc_ingestion`) that fans out over the `domains` variable, so onboarding a new JDBC source does **not** require a new job — see [Onboarding a New JDBC Source](#onboarding-a-new-jdbc-source).
+
+### CI/CD (GitHub Actions)
+
+Two workflows under `.github/workflows/` automate validation and deployment. Auth
+uses **OAuth M2M service principals** (one per environment) — no PATs.
+
+| Workflow | Trigger | Action |
+|----------|---------|--------|
+| `ci.yml` | Pull request → `master` (or manual) | Unit tests (PySpark) + `bundle validate -t dev` |
+| `deploy.yml` | Push to `master` | Deploy to `staging` |
+| `deploy.yml` | GitHub **Release** published | Deploy to `prod` (approval-gated) |
+| `deploy.yml` | Manual `workflow_dispatch` | Deploy to the chosen target (`dev` / `staging` / `prod`) |
+
+**Setup (one-time):**
+
+1. Create a Databricks **service principal per environment** and grant it OAuth
+   (M2M) access + workspace/catalog permissions.
+2. In GitHub → **Settings → Environments**, create `dev`, `staging`, `production`.
+   Add **required reviewers** on `production` to gate prod deploys with approval.
+3. For each environment, add the secrets:
+   - `DATABRICKS_CLIENT_ID`
+   - `DATABRICKS_CLIENT_SECRET`
+
+   The workspace **host** is read from the matching target in `databricks.yml`
+   (replace the placeholder `adb-...` hosts with your real workspace URLs).
+
+**Promotion flow:** open a PR (CI validates) → merge to `master` (auto-deploy to
+staging) → publish a Release (deploy to prod after approval).
+
 
 ---
 
 ## Running Jobs
 
-Three jobs are defined across the domain-specific files in `resources/`:
+The engine defines **one generic, reusable job** in `resources/jdbc_ingestion.job.yml`:
 
-| Job key | Domain | Sources | Schedule |
-|---------|--------|---------|----------|
-| `ingestion_mv` | MV | SQL Server only | Daily 02:00 CET |
-| `ingestion_wolf` | WOLF | SQL Server + REST APIs | Daily 03:00 CET |
-| `ingestion_all_domains` | All | SQL Server + REST APIs | Sundays 01:00 CET (paused) |
+| Job key | Sources | Fan-out | Schedule |
+|---------|---------|---------|----------|
+| `jdbc_ingestion` | JDBC only | one run of `main_ingestion.py` per entry in `domains` (parallel) | Daily 02:00 CET |
 
-**`ingestion_mv`** runs a single task:
-1. `ingest_sqlserver_mv` — `main_ingestion.py` with `domain_name=mv`
-
-**`ingestion_wolf`** runs two tasks in sequence:
-1. `ingest_sqlserver_wolf` — `main_ingestion.py` with `domain_name=wolf`
-2. `ingest_apis_wolf` — `main_api_ingestion.py` with `domain_name=wolf` (depends on task 1)
+The single `ingest_jdbc_domains` task is a **`for_each`** over the `domains` variable
+(defined in `databricks.yml`). For each domain it runs `main_ingestion.py` with
+`domain_name` and `adls_base_path` taken from that domain entry. The notebook then
+loads `config/domains/<domain>/` to connect to the JDBC database and writes — per
+each table's `write_mode` — Parquet files to ADLS and/or Unity Catalog Delta tables.
 
 ```bash
-# Trigger manually
-databricks bundle run -t dev ingestion_mv
-databricks bundle run -t prod ingestion_wolf
-databricks bundle run -t prod ingestion_all_domains
+# Trigger manually (runs every domain in the `domains` list)
+databricks bundle run -t dev jdbc_ingestion
+databricks bundle run -t prod jdbc_ingestion
 ```
 
-### Adding a New Domain
+### Onboarding a New JDBC Source
 
-1. Create the config directory:
+Each developer onboards a **new data source with their own config file** — no code
+and no new job are required. The same generic `jdbc_ingestion` job picks it up.
+
+1. Create the domain config directory (this is *your* config file set):
 ```bash
-mkdir -p config/domains/new_domain
-# Copy and edit the three YAML files
-cp config/domains/mv/*.yml config/domains/new_domain/
+mkdir -p config/domains/my_source
+cp config/domains/mv/tables_config.yml     config/domains/my_source/
+cp config/domains/mv/connector_config.yml  config/domains/my_source/
 ```
 
-2. Update `domain:` keys in all three YAMLs to `new_domain`.
+2. Edit the two YAMLs:
+   - Set `domain: my_source` in both files.
+   - In `connector_config.yml`, set the JDBC `driver`, `secret_scope` and `secret_keys`
+     for your database. The engine works with any JDBC source — for a non-SQL Server
+     database just point `driver` to the right JDBC driver
+     (e.g. PostgreSQL, Oracle, MySQL) and adjust the URL/options accordingly.
+   - In `tables_config.yml`, declare the tables to ingest and, per table, the
+     `write_mode` (`adls`, `unity_catalog`, or `both`).
 
-3. Create secret scopes for the new domain.
+3. Create the secret scope holding your DB credentials:
+```bash
+databricks secrets create-scope --scope sqlserver-my_source
+databricks secrets put --scope sqlserver-my_source --key hostname --string-value "..."
+databricks secrets put --scope sqlserver-my_source --key username --string-value "..."
+databricks secrets put --scope sqlserver-my_source --key password --string-value "..."
+# + port, database
+```
 
-4. Add a new resource file such as `resources/jobs_new_domain.yml` (copy `resources/jobs_mv.yml` or `resources/jobs_wolf.yml` and adapt it).
+4. Register the domain in `databricks.yml` by adding one entry to the `domains`
+   variable (in the `default:` block and/or the relevant target):
+```yaml
+variables:
+  domains:
+    default:
+      - name: "my_source"
+        adls_base_path: "abfss://my-source-bronze@yourstorageaccount.dfs.core.windows.net"
+```
 
-5. Deploy:
+5. Deploy — the existing job now ingests your source automatically:
 ```bash
 databricks bundle deploy -t dev
-databricks bundle run   -t dev ingestion_new_domain
+databricks bundle run   -t dev jdbc_ingestion
 ```
 
 ---
@@ -647,7 +695,7 @@ databricks secrets list --scope sqlserver-mv
 
 ---
 
-**Bundle name**: `sqlserver-api-ingestion-framework`  
+**Bundle name**: `jdbc-ingestion-engine`  
 **Version**: 1.1.0  
 **Last updated**: April 2026  
 **Maintained by**: Data Engineering Team

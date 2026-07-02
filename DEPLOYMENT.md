@@ -76,7 +76,7 @@ targets:
 
 ### 3.3 Update Email Notifications
 
-In the relevant job file under `resources/` (for example `resources/jobs_mv.yml` or `resources/jobs_wolf.yml`), update email addresses:
+In the job file `resources/jdbc_ingestion.job.yml`, update email addresses:
 
 ```yaml
 email_notifications:
@@ -178,9 +178,7 @@ databricks secrets list --scope sqlserver-mv
 ## Step 5: Validate Configuration
 
 ```bash
-cd sqlserver-api-ingestion-framework
-
-# Validate bundle
+cd jdbc-ingestion-engine bundle
 databricks bundle validate
 
 # Expected output: "Validation OK!"
@@ -207,30 +205,24 @@ Verify deployment:
 
 ```bash
 # List deployed jobs
-databricks jobs list | grep "Ingestion"
+databricks jobs list | grep "JDBC Ingestion"
 ```
 
 ## Step 7: Test Run (Dev)
 
-### 7.1 Test SQL Server Ingestion
+### 7.1 Test JDBC Ingestion
 
 ```bash
-databricks bundle run -t dev ingestion_mv
+databricks bundle run -t dev jdbc_ingestion
 ```
 
 Monitor in Databricks UI:
 1. Go to **Workflows** → **Jobs**
-2. Find `[dev] Ingestion MV Domain`
+2. Find `[dev] JDBC Ingestion Engine`
 3. Click on the running job
-4. View logs and progress
+4. View logs and progress (one iteration per domain)
 
-### 7.2 Test API Ingestion
-
-```bash
-databricks bundle run -t dev ingestion_wolf
-```
-
-### 7.3 Verify Data
+### 7.2 Verify Data
 
 ```sql
 -- In Databricks SQL editor
@@ -305,8 +297,7 @@ Once dev is working:
 databricks bundle deploy -t staging
 
 # Test
-databricks bundle run -t staging ingestion_mv
-databricks bundle run -t staging ingestion_wolf
+databricks bundle run -t staging jdbc_ingestion
 ```
 
 Verify in staging:
@@ -362,7 +353,7 @@ databricks bundle deploy -t prod
 
 ```bash
 # Run manually first to verify
-databricks bundle run -t prod ingestion_mv
+databricks bundle run -t prod jdbc_ingestion
 ```
 
 Monitor closely:

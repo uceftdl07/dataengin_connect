@@ -7,14 +7,14 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setup(
-    name="sqlserver-api-ingestion-framework",
+    name="jdbc-ingestion-engine",
     version="1.0.0",
     author="Data Engineering Team",
     author_email="data-engineering@yourcompany.com",
-    description="Production-ready ingestion framework for SQL Server and REST APIs to Databricks",
+    description="Production-ready ingestion engine for JDBC sources (SQL Server and other databases) to Databricks",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourcompany/sqlserver-api-ingestion-framework",
+    url="https://github.com/yourcompany/jdbc-ingestion-engine",
     packages=find_packages(exclude=["tests", "tests.*"]),
     classifiers=[
         "Development Status :: 5 - Production/Stable",
