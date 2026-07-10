@@ -240,6 +240,11 @@ tables:
 
     filter_query: "IsActive = 1"      # Optional WHERE clause
 
+    columns:                          # Optional: only ingest these columns
+      - "ProductID"                   #   (SELECT pushdown). Omit for all columns.
+      - "ProductName"
+      - "UnitPrice"
+
     write_mode: "unity_catalog"       # "unity_catalog" | "adls" | "both"
     adls_path: "products/full"        # Path within adls_base_path (for "adls"/"both")
 
@@ -313,7 +318,36 @@ global_options:
     on_error: "fail"    # "fail" | "skip" | "continue"
 ```
 
-### apis_config.yml
+#### Column selection (`columns`)
+
+Add an optional `columns:` list to any table to let the source owner pick exactly
+which columns are ingested. The projection is **pushed down to the source query**
+(`SELECT col1, col2 FROM ...`), so only the requested columns travel over JDBC —
+better performance and no unwanted PII columns.
+
+- **Omitted** → all columns are read (`SELECT *`), unchanged default behavior.
+- **Validation** → each name must be a plain SQL identifier (optionally
+  `schema.col` / `alias.col`); anything else is rejected to prevent SQL injection.
+- **Technical columns auto-included** → if you restrict `columns`, the engine adds
+  `incremental_column` and `merge_key` automatically when missing (they are needed
+  for the incremental filter and the MERGE upsert), logging each addition.
+- **derived_columns caveat** → a `derived_columns` expression (e.g.
+  `year(OrderDate)`) references a *source* column; if you use `columns`, list that
+  source column explicitly, otherwise the derived/partition column cannot be built.
+
+```yaml
+- table_name: "dbo.Orders"
+  target_table: "orders"
+  load_mode: "incremental"
+  incremental_column: "OrderDate"     # auto-added to the projection if omitted
+  merge_key: "OrderID"                # auto-added to the projection if omitted
+  columns:
+    - "OrderID"
+    - "Amount"
+    - "OrderDate"                     # keep it: referenced by derived_columns below
+  derived_columns:
+    order_year: "year(OrderDate)"
+```
 
 ```yaml
 domain: mv
@@ -392,6 +426,7 @@ domain: mv
 
 connector:
   type: "sqlserver"
+  auth_type: "sql"                    # sql | service_principal | managed_identity | access_token
   secret_scope: "sqlserver-mv"        # Databricks Secret Scope name
   secret_keys:
     hostname: "hostname"
@@ -408,6 +443,67 @@ connector:
     isolationLevel: "READ_UNCOMMITTED"
 ```
 
+#### JDBC Authentication (`auth_type`)
+
+Authentication is chosen **per data source** via `auth_type`, so a heterogeneous
+fleet of JDBC databases can each use the right strategy without any code change.
+
+| `auth_type` | How it authenticates | Secret required? | Where it applies |
+|-------------|----------------------|:----------------:|------------------|
+| `sql` *(default)* | SQL login — `username` / `password` from the secret scope | Yes (SQL password) | Any JDBC DB (SQL Server on-prem, PostgreSQL, MySQL, Oracle…) |
+| `service_principal` | Entra ID SP — `authentication=ActiveDirectoryServicePrincipal`, `user=client_id`, `password=client_secret` | Yes (SP **client secret**) | Azure SQL DB / MI / Synapse |
+| `managed_identity` | Entra ID managed identity of the Databricks compute — `authentication=ActiveDirectoryManagedIdentity` | **No — zero secret** | Azure SQL DB / MI / Synapse |
+| `access_token` | Pre-generated Entra token via `accessToken` (obtained from the SP with MSAL) | Yes (SP client secret to mint the token) | Azure SQL DB / MI / Synapse |
+
+> **"Service principal instead of secrets" — the honest answer:** only
+> `managed_identity` is truly secret-free, and it requires the Databricks compute
+> to run under an Entra **managed identity** (e.g. via an Access Connector) that is
+> mapped to a DB user with the right grants. `service_principal` and
+> `access_token` do use the SP, but you still store its **client secret** in a
+> scope — you're replacing a SQL password with the SP secret, not removing secrets.
+> Entra-based auth only works on **Azure SQL / MI / Synapse**; a plain on-prem SQL
+> Server or a non-Azure engine (PostgreSQL, Oracle…) stays on `sql`.
+
+**`secret_keys` per strategy:**
+
+```yaml
+# service_principal (Azure SQL) — SP client id + secret
+connector:
+  type: "sqlserver"
+  auth_type: "service_principal"
+  secret_scope: "sqlserver-mydb"
+  secret_keys:
+    hostname: "hostname"
+    port: "port"
+    database: "database"
+    client_id: "sp_client_id"
+    client_secret: "sp_client_secret"
+
+# managed_identity (Azure SQL) — ZERO secret; client_id only for a user-assigned MI
+connector:
+  type: "sqlserver"
+  auth_type: "managed_identity"
+  secret_scope: "sqlserver-mydb"
+  secret_keys:
+    hostname: "hostname"
+    port: "port"
+    database: "database"
+    # client_id: "mi_client_id"   # omit for a system-assigned managed identity
+
+# access_token (Azure SQL) — token minted at runtime from the SP (needs the `msal` library)
+connector:
+  type: "sqlserver"
+  auth_type: "access_token"
+  secret_scope: "sqlserver-mydb"
+  secret_keys:
+    hostname: "hostname"
+    port: "port"
+    database: "database"
+    client_id: "sp_client_id"
+    client_secret: "sp_client_secret"
+    tenant_id: "tenant_id"
+```
+
 For a **mixed domain** (SQL Server + APIs, like WOLF), add an `api_secrets` section:
 
 ```yaml
@@ -415,6 +511,7 @@ domain: wolf
 
 connector:
   type: "sqlserver"
+  auth_type: "sql"
   secret_scope: "sqlserver-wolf"
   secret_keys:
     hostname: "hostname"

@@ -76,6 +76,16 @@ tables:
     
     filter_query: "IsActive = 1 AND DeletedDate IS NULL"
     
+    # Column projection (optional): only these columns are read from the source
+    # (SELECT ProductID, ProductName, ... pushed down over JDBC). Omit `columns`
+    # to read every column (SELECT *). Technical columns (incremental_column,
+    # merge_key) are auto-included when missing.
+    columns:
+      - "ProductID"
+      - "ProductName"
+      - "UnitPrice"
+      - "IsActive"
+    
     write_mode: "unity_catalog"
     adls_path: "products/full"
     

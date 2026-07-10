@@ -17,22 +17,32 @@ class SecretManager:
         """
         self.dbutils = dbutils
     
+    # Supported JDBC authentication strategies (see build_jdbc_properties).
+    SUPPORTED_AUTH_TYPES = ("sql", "service_principal", "managed_identity", "access_token")
+
     def get_sqlserver_credentials(self, connector_config: Dict[str, Any]) -> Dict[str, str]:
         """
-        Retrieve SQL Server credentials from secret scope.
-        
+        Retrieve connection credentials from the secret scope.
+
+        Only the keys declared in `secret_keys` are fetched, so the same method
+        works for every auth strategy:
+          - sql               -> hostname, port, database, username, password
+          - service_principal -> hostname, port, database, client_id, client_secret
+          - managed_identity  -> hostname, port, database (+ optional client_id)
+          - access_token      -> hostname, port, database (token generated at runtime)
+
         Args:
             connector_config: Connector config with secret_scope and secret_keys
-        
+
         Returns:
-            Dict with hostname, port, database, username, password
-        
+            Dict of the resolved secret values keyed by their logical name
+
         Raises:
             ValueError: If secrets cannot be retrieved
         """
         scope = connector_config['secret_scope']
-        keys = connector_config['secret_keys']
-        
+        keys = connector_config.get('secret_keys', {})
+
         credentials = {}
         for key_name, secret_key in keys.items():
             try:
@@ -112,25 +122,78 @@ class SecretManager:
     def build_jdbc_properties(
         self,
         credentials: Dict[str, str],
-        jdbc_options: Dict[str, Any]
+        jdbc_options: Dict[str, Any],
+        auth_type: str = "sql"
     ) -> Dict[str, str]:
         """
-        Build JDBC properties (user, password, driver, etc.).
-        
+        Build JDBC properties for the requested authentication strategy.
+
+        auth_type values:
+          - "sql"                : classic SQL login (user/password from secrets).
+          - "service_principal"  : Microsoft Entra ID service principal.
+                                   Uses `authentication=ActiveDirectoryServicePrincipal`
+                                   with user=client_id, password=client_secret.
+                                   Requires an Entra-enabled DB (Azure SQL / MI / Synapse)
+                                   and the msal4j library on the cluster classpath.
+          - "managed_identity"   : Entra ID managed identity of the Databricks compute.
+                                   Uses `authentication=ActiveDirectoryManagedIdentity`.
+                                   NO secret at all. Pass a user-assigned MI client id via
+                                   the `client_id` credential (omit for system-assigned).
+          - "access_token"       : Pass a pre-generated Entra access token via
+                                   `accessToken` (see get_entra_access_token()).
+
         Args:
-            credentials: Dict with username, password
-            jdbc_options: JDBC options
-        
+            credentials: Resolved credentials (keys depend on auth_type)
+            jdbc_options: JDBC options (driver, fetchsize, batchsize, isolationLevel...)
+            auth_type: Authentication strategy (default "sql")
+
         Returns:
             Dict of JDBC properties
+
+        Raises:
+            ValueError: If auth_type is unsupported or required credentials are missing
         """
+        auth = (auth_type or "sql").lower()
+        if auth not in self.SUPPORTED_AUTH_TYPES:
+            raise ValueError(
+                f"Unsupported auth_type '{auth_type}'. "
+                f"Expected one of: {', '.join(self.SUPPORTED_AUTH_TYPES)}"
+            )
+
         properties = {
-            "user": credentials['username'],
-            "password": credentials['password'],
             "driver": jdbc_options.get('driver', 'com.microsoft.sqlserver.jdbc.SQLServerDriver')
         }
-        
-        # Performance options
+
+        if auth == "sql":
+            properties["user"] = credentials['username']
+            properties["password"] = credentials['password']
+
+        elif auth == "service_principal":
+            # Entra ID service principal (client credentials).
+            properties["authentication"] = "ActiveDirectoryServicePrincipal"
+            properties["user"] = credentials['client_id']
+            properties["password"] = credentials['client_secret']
+            properties.setdefault("encrypt", "true")
+
+        elif auth == "managed_identity":
+            # Managed identity of the Databricks compute -> zero secret.
+            properties["authentication"] = "ActiveDirectoryManagedIdentity"
+            # Only needed for a *user-assigned* managed identity.
+            if credentials.get('client_id'):
+                properties["msiClientId"] = credentials['client_id']
+            properties.setdefault("encrypt", "true")
+
+        elif auth == "access_token":
+            token = credentials.get('access_token')
+            if not token:
+                raise ValueError(
+                    "auth_type 'access_token' requires an 'access_token' credential "
+                    "(generate one with get_entra_access_token())."
+                )
+            properties["accessToken"] = token
+            properties.setdefault("encrypt", "true")
+
+        # Performance options (apply to every auth strategy)
         if 'fetchsize' in jdbc_options:
             properties['fetchsize'] = str(jdbc_options['fetchsize'])
         
@@ -141,3 +204,50 @@ class SecretManager:
             properties['isolationLevel'] = jdbc_options['isolationLevel']
         
         return properties
+
+    def get_entra_access_token(
+        self,
+        client_id: str,
+        client_secret: str,
+        tenant_id: str,
+        scope: str = "https://database.windows.net/.default"
+    ) -> str:
+        """
+        Acquire a Microsoft Entra ID access token via a service principal.
+
+        Optional helper for auth_type "access_token". Requires the `msal` package
+        on the cluster. For SQL databases keep the default resource scope
+        (https://database.windows.net/.default).
+
+        Args:
+            client_id: Service principal (application) client id
+            client_secret: Service principal client secret
+            tenant_id: Entra ID tenant id
+            scope: OAuth resource scope for the target database
+
+        Returns:
+            A bearer access token string
+
+        Raises:
+            RuntimeError: If the token cannot be acquired
+        """
+        try:
+            import msal
+        except ImportError as e:
+            raise RuntimeError(
+                "The 'msal' package is required for access_token auth. "
+                "Add it to the job libraries."
+            ) from e
+
+        app = msal.ConfidentialClientApplication(
+            client_id=client_id,
+            client_credential=client_secret,
+            authority=f"https://login.microsoftonline.com/{tenant_id}",
+        )
+        result = app.acquire_token_for_client(scopes=[scope])
+        if "access_token" not in result:
+            raise RuntimeError(
+                f"Failed to acquire Entra token: "
+                f"{result.get('error_description', result.get('error', 'unknown error'))}"
+            )
+        return result["access_token"]

@@ -3,9 +3,13 @@ description: "Connecteur SQL Server pour le domaine WOLF"
 
 connector:
   type: "sqlserver"
-  
+
+  # See config/domains/mv/connector_config.yml for the full auth_type reference.
+  # Values: sql | service_principal | managed_identity | access_token
+  auth_type: "sql"
+
   secret_scope: "sqlserver-wolf"
-  
+
   secret_keys:
     hostname: "hostname"
     port: "port"

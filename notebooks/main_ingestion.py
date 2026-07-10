@@ -121,19 +121,32 @@ except Exception as e:
 
 try:
     secret_manager = SecretManager(dbutils)
-    
-    # Get credentials
-    credentials = secret_manager.get_sqlserver_credentials(connector_config['connector'])
-    
+
+    connector_cfg = connector_config['connector']
+    auth_type = connector_cfg.get('auth_type', 'sql')
+    logger.info(f"JDBC auth strategy: {auth_type}")
+
+    # Get credentials (only the keys declared in secret_keys are fetched)
+    credentials = secret_manager.get_sqlserver_credentials(connector_cfg)
+
+    # For access_token auth, generate the Entra token from the service principal
+    if auth_type == 'access_token' and 'access_token' not in credentials:
+        credentials['access_token'] = secret_manager.get_entra_access_token(
+            client_id=credentials['client_id'],
+            client_secret=credentials['client_secret'],
+            tenant_id=credentials['tenant_id'],
+        )
+
     # Build JDBC connection
     jdbc_url = secret_manager.build_jdbc_url(
         credentials,
-        connector_config['connector']['jdbc_options']
+        connector_cfg['jdbc_options']
     )
     
     jdbc_properties = secret_manager.build_jdbc_properties(
         credentials,
-        connector_config['connector']['jdbc_options']
+        connector_cfg['jdbc_options'],
+        auth_type=auth_type
     )
     
     # Create connector
@@ -141,7 +154,7 @@ try:
         spark=spark,
         jdbc_url=jdbc_url,
         jdbc_properties=jdbc_properties,
-        jdbc_options=connector_config['connector']['jdbc_options']
+        jdbc_options=connector_cfg['jdbc_options']
     )
     
     # Test connection

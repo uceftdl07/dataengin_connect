@@ -2,7 +2,8 @@
 Generic SQL Server connector via JDBC.
 Production-ready with error handling and logging.
 """
-from typing import Dict, Any, Optional, Union
+import re
+from typing import Dict, Any, List, Optional, Union
 from pyspark.sql import SparkSession, DataFrame
 from datetime import datetime, date
 import logging
@@ -10,6 +11,47 @@ import logging
 
 class GenericConnector:
     """Generic connector for SQL Server via JDBC."""
+
+    # A safe (unquoted, dialect-agnostic) SQL identifier, optionally
+    # schema/alias-qualified: e.g. "OrderId", "dbo.Orders", "t.Amount".
+    _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
+
+    @classmethod
+    def _build_select_clause(cls, columns: Optional[List[str]]) -> str:
+        """
+        Build the SELECT projection from an optional column list.
+
+        Returns "*" when no columns are requested (full projection). Every
+        requested column is validated against a strict identifier pattern to
+        prevent SQL injection through the config.
+
+        Args:
+            columns: Optional list of column names to project
+
+        Returns:
+            The SELECT clause body (e.g. "col1, col2" or "*")
+
+        Raises:
+            ValueError: If the list is empty or a column name is invalid
+        """
+        if not columns:
+            return "*"
+
+        if not isinstance(columns, list):
+            raise ValueError(f"'columns' must be a list, got {type(columns).__name__}")
+
+        cleaned = [str(c).strip() for c in columns]
+        if any(not c for c in cleaned):
+            raise ValueError("'columns' contains an empty column name")
+
+        invalid = [c for c in cleaned if not cls._IDENTIFIER_RE.match(c)]
+        if invalid:
+            raise ValueError(
+                f"Invalid column name(s) in 'columns': {invalid}. "
+                f"Expected simple identifiers (optionally schema/alias-qualified)."
+            )
+
+        return ", ".join(cleaned)
     
     def __init__(
         self,
@@ -29,7 +71,8 @@ class GenericConnector:
         self,
         table_name: str,
         read_options: Optional[Dict[str, Any]] = None,
-        filter_query: Optional[str] = None
+        filter_query: Optional[str] = None,
+        columns: Optional[List[str]] = None
     ) -> DataFrame:
 
         # Merge properties and options
@@ -40,9 +83,14 @@ class GenericConnector:
                 if key not in ['numPartitions', 'partitionColumn', 'lowerBound', 'upperBound']:
                     merged_properties[key] = str(value)
         
-        # Build query
-        if filter_query:
-            query = f"(SELECT * FROM {table_name} WHERE {filter_query}) AS filtered_table"
+        # Column projection (pushed down to the source: SELECT col1, col2 ...)
+        select_clause = self._build_select_clause(columns)
+
+        # Build query. Use a subquery when we project a subset of columns or
+        # apply a filter; otherwise let Spark read the table directly.
+        if columns or filter_query:
+            where = f" WHERE {filter_query}" if filter_query else ""
+            query = f"(SELECT {select_clause} FROM {table_name}{where}) AS projected_table"
         else:
             query = table_name
         
@@ -76,7 +124,8 @@ class GenericConnector:
         incremental_column: str,
         last_value: Optional[Union[str, datetime, date, int]],
         read_options: Optional[Dict[str, Any]] = None,
-        filter_query: Optional[str] = None
+        filter_query: Optional[str] = None,
+        columns: Optional[List[str]] = None
     ) -> DataFrame:
         """
         Read new data since last extraction.
@@ -87,6 +136,7 @@ class GenericConnector:
             last_value: Last extracted value (None for first run)
             read_options: Read options
             filter_query: Additional WHERE filter
+            columns: Optional subset of columns to project (SELECT pushdown)
         
         Returns:
             DataFrame with new data
@@ -94,7 +144,7 @@ class GenericConnector:
         if last_value is None:
             # First run: load all data
             self.logger.info(f"First incremental load for {table_name} - loading all data")
-            return self.read_table(table_name, read_options, filter_query)
+            return self.read_table(table_name, read_options, filter_query, columns)
         
         # Build incremental filter
         # Handle different types
@@ -113,7 +163,7 @@ class GenericConnector:
         else:
             combined_filter = incremental_filter
         
-        return self.read_table(table_name, read_options, combined_filter)
+        return self.read_table(table_name, read_options, combined_filter, columns)
     
     def get_max_value(
         self,

@@ -3,15 +3,37 @@ description: "Connecteur SQL Server pour le domaine MV"
 
 connector:
   type: "sqlserver"
-  
+
+  # JDBC authentication strategy. Choose per data source:
+  #   sql               -> SQL login (username/password from the secret scope) [default]
+  #   service_principal -> Entra ID service principal (client_id/client_secret) - Azure SQL/MI
+  #   managed_identity  -> Entra ID managed identity of the compute (NO secret) - Azure SQL/MI
+  #   access_token      -> pre-generated Entra token (client_id/client_secret/tenant_id)
+  auth_type: "sql"
+
   secret_scope: "sqlserver-mv"
-  
+
+  # Keys to read from the secret scope. They depend on auth_type:
+  #   sql               -> hostname, port, database, username, password
+  #   service_principal -> hostname, port, database, client_id, client_secret
+  #   managed_identity  -> hostname, port, database   (+ client_id only if user-assigned MI)
+  #   access_token      -> hostname, port, database, client_id, client_secret, tenant_id
   secret_keys:
     hostname: "hostname"
     port: "port"
     database: "database"
     username: "username"
     password: "password"
+
+  # --- Example: zero-secret Entra managed identity (Azure SQL) --------------
+  # auth_type: "managed_identity"
+  # secret_scope: "sqlserver-mv"
+  # secret_keys:
+  #   hostname: "hostname"
+  #   port: "port"
+  #   database: "database"
+  #   # client_id: "msi_client_id"   # only for a user-assigned managed identity
+  # -------------------------------------------------------------------------
   
   jdbc_options:
     driver: "com.microsoft.sqlserver.jdbc.SQLServerDriver"

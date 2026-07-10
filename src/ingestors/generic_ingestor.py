@@ -252,14 +252,62 @@ class GenericIngestor:
         except Exception as exc:
             self.logger.warning(f"Could not save watermark for {target_table}: {exc}")
     
+    def _resolve_columns(self, table_config: Dict[str, Any]) -> Optional[list]:
+        """
+        Resolve the effective column projection for a table.
+
+        Returns None when the user did not request a subset (full projection,
+        i.e. SELECT *). When a `columns` list is provided, technical columns
+        required by the load are auto-included if missing (order preserved):
+          - `incremental_column` (needed by the incremental WHERE filter)
+          - `merge_key` (needed by the MERGE upsert)
+
+        Note: any source column referenced by `derived_columns` expressions must
+        be listed explicitly by the user, since those expressions are opaque here.
+
+        Args:
+            table_config: Table configuration
+
+        Returns:
+            Ordered list of columns to read, or None for full projection
+        """
+        columns = table_config.get('columns')
+        if not columns:
+            return None
+
+        effective = list(columns)
+
+        def _ensure(col):
+            if col and col not in effective:
+                effective.append(col)
+                self.logger.info(
+                    f"Auto-including technical column '{col}' in projection "
+                    f"for {table_config['table_name']}"
+                )
+
+        # incremental column is required to evaluate the incremental filter
+        if table_config.get('load_mode') == 'incremental':
+            _ensure(table_config.get('incremental_column'))
+
+        # merge key(s) are required for the MERGE upsert
+        merge_key = table_config.get('merge_key')
+        if isinstance(merge_key, str):
+            _ensure(merge_key)
+        elif isinstance(merge_key, list):
+            for key in merge_key:
+                _ensure(key)
+
+        return effective
+
     def _load_full(self, table_config: Dict[str, Any]) -> DataFrame:
         """Load all data from table."""
         table_name = table_config['table_name']
         read_options = table_config.get('read_options', {})
         filter_query = table_config.get('filter_query')
+        columns = self._resolve_columns(table_config)
         
         self.logger.info(f"Loading full data from {table_name}")
-        return self.connector.read_table(table_name, read_options, filter_query)
+        return self.connector.read_table(table_name, read_options, filter_query, columns)
     
     def _load_incremental(self, table_config: Dict[str, Any]) -> DataFrame:
         """Load new data (incremental)."""
@@ -283,13 +331,15 @@ class GenericIngestor:
         
         read_options = table_config.get('read_options', {})
         filter_query = table_config.get('filter_query')
+        columns = self._resolve_columns(table_config)
         
         return self.connector.read_incremental(
             table_name,
             incremental_column,
             last_value,
             read_options,
-            filter_query
+            filter_query,
+            columns
         )
     
     def _get_last_incremental_value(
