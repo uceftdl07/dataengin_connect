@@ -8,6 +8,27 @@ from src.utils.secret_manager import SecretManager
 @pytest.mark.unit
 class TestSecretManager:
     """Test SecretManager class."""
+
+    def test_get_mongodb_connection_uri(self, mock_dbutils):
+        manager = SecretManager(mock_dbutils)
+        mock_dbutils.secrets.get.side_effect = None
+        mock_dbutils.secrets.get.return_value = "mongodb://example"
+
+        uri = manager.get_mongodb_connection_uri({
+            "secret_scope": "mongodb-test",
+            "uri_secret_key": "connection_uri",
+        })
+
+        assert uri == "mongodb://example"
+        mock_dbutils.secrets.get.assert_called_once_with(
+            scope="mongodb-test", key="connection_uri"
+        )
+
+    def test_get_mongodb_connection_uri_requires_secret_config(self, mock_dbutils):
+        manager = SecretManager(mock_dbutils)
+
+        with pytest.raises(ValueError, match="secret_scope.*uri_secret_key"):
+            manager.get_mongodb_connection_uri({})
     
     def test_get_sqlserver_credentials(self, mock_dbutils, sample_connector_config):
         """Test retrieving SQL Server credentials."""

@@ -53,6 +53,23 @@ class SecretManager:
                 )
         
         return credentials
+
+    def get_mongodb_connection_uri(self, connector_config: Dict[str, Any]) -> str:
+        """Retrieve the MongoDB connection URI from a Databricks secret scope."""
+        scope = connector_config.get('secret_scope')
+        secret_key = connector_config.get('uri_secret_key')
+        if not scope or not secret_key:
+            raise ValueError(
+                "MongoDB connector requires 'secret_scope' and 'uri_secret_key'"
+            )
+
+        try:
+            return self.dbutils.secrets.get(scope=scope, key=secret_key)
+        except Exception as e:
+            raise ValueError(
+                f"Failed to retrieve MongoDB connection URI from scope '{scope}' "
+                f"using key '{secret_key}': {str(e)}"
+            ) from e
     
     def get_api_credentials(
         self,

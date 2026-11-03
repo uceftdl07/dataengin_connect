@@ -1,0 +1,22 @@
+domain: mongo_example
+description: "Collections MongoDB à ingérer"
+
+tables:
+  - table_name: "event_records"
+    collection: "events" # Nom réel de la collection MongoDB
+    target_table: "events"
+    load_mode: "full"
+    enabled: true
+    write_mode: "unity_catalog"
+
+global_options:
+  add_metadata_columns: true
+  metadata_columns:
+    - name: "_ingestion_timestamp"
+      type: "timestamp"
+      expression: "current_timestamp()"
+    - name: "_source_domain"
+      type: "string"
+      expression: "'mongo_example'"
+  error_handling:
+    on_error: "fail"

@@ -301,7 +301,7 @@ class GenericIngestor:
 
     def _load_full(self, table_config: Dict[str, Any]) -> DataFrame:
         """Load all data from table."""
-        table_name = table_config['table_name']
+        table_name = table_config.get('collection', table_config['table_name'])
         read_options = table_config.get('read_options', {})
         filter_query = table_config.get('filter_query')
         columns = self._resolve_columns(table_config)
@@ -311,7 +311,7 @@ class GenericIngestor:
     
     def _load_incremental(self, table_config: Dict[str, Any]) -> DataFrame:
         """Load new data (incremental)."""
-        table_name = table_config['table_name']
+        table_name = table_config.get('collection', table_config['table_name'])
         target_table = table_config['target_table']
         incremental_column = table_config.get('incremental_column')
         

@@ -1,6 +1,6 @@
-# MTE Engine — SQL Server & API Ingestion Framework
+# MTE Engine — SQL Server, MongoDB & API Ingestion Framework
 
-A **metadata-driven, production-ready** ingestion framework for loading data from SQL Server and REST APIs into Databricks (ADLS + Unity Catalog / Delta Lake).
+A **metadata-driven, production-ready** ingestion framework for loading data from SQL Server, MongoDB and REST APIs into Databricks (ADLS + Unity Catalog / Delta Lake).
 
 Zero code required to add a new source — everything is driven by YAML configuration files.
 
@@ -33,6 +33,15 @@ Zero code required to add a new source — everything is driven by YAML configur
 | Dual write | ADLS Parquet and/or Unity Catalog Delta simultaneously |
 | Retry | Exponential back-off (configurable `max_retries`) |
 | Watermarks | Dedicated `_watermarks` Delta table — survives target table rebuilds |
+
+### MongoDB Ingestion
+| Capability | Details |
+|---|---|
+| Source selection | Database and default collection in `connector_config.yml`; per-table collection overrides in `tables_config.yml` |
+| Load modes | `full` and `incremental` using a configured watermark field |
+| Filtering | MongoDB `$match` JSON in `filter_query`; optional aggregation stages in `read_options.aggregation_pipeline` |
+| Destination | Same ADLS Parquet and/or Unity Catalog Delta output as SQL Server |
+| Credentials | MongoDB URI retrieved from a Databricks Secret Scope |
 
 ### REST API Ingestion
 | Capability | Details |
@@ -79,9 +88,12 @@ Zero code required to add a new source — everything is driven by YAML configur
          │                             │
          ▼                             ▼
 ┌─────────────────────┐     ┌─────────────────────┐
-│  GenericConnector   │     │ GenericApiConnector  │
-│  (JDBC / PySpark)   │     │ (requests + auth)    │
+│ GenericConnector    │     │ GenericApiConnector  │
+│ (JDBC / PySpark)    │     │ (requests + auth)    │
 └────────┬────────────┘     └──────────┬───────────┘
+         │                             │
+   MongoDBConnector                    │
+   (Mongo Spark)                       │
          │                             │
          ▼                             ▼
 ┌─────────────────────────────────────────────────┐
@@ -100,7 +112,7 @@ Zero code required to add a new source — everything is driven by YAML configur
 MTE_Engine/
 ├── databricks.yml                      # Asset Bundle — name, `domains` list & environments
 ├── resources/
-│   └── jdbc_ingestion.job.yml          # Generic JDBC ingestion job (for_each over domains)
+│   └── jdbc_ingestion.job.yml          # Shared SQL Server / MongoDB job (for_each over domains)
 ├── config/
 │   └── domains/
 │       ├── mv/
@@ -114,6 +126,7 @@ MTE_Engine/
 ├── src/
 │   ├── connectors/
 │   │   ├── generic_connector.py        # SQL Server JDBC connector
+│   │   ├── mongodb_connector.py        # MongoDB Spark connector
 │   │   └── generic_api_connector.py    # REST API connector (auth + pagination)
 │   ├── ingestors/
 │   │   ├── generic_ingestor.py         # SQL → ADLS / Unity Catalog
@@ -419,7 +432,8 @@ apis:
 
 ### connector_config.yml
 
-There is one file per domain. For a **SQL Server-only domain** (like MV), no `api_secrets` section is needed:
+There is one file per domain. SQL Server domains use the JDBC settings below; no
+`api_secrets` section is needed unless the domain also uses APIs:
 
 ```yaml
 domain: mv
@@ -441,6 +455,58 @@ connector:
     loginTimeout: "30"
     fetchsize: "10000"
     isolationLevel: "READ_UNCOMMITTED"
+```
+
+For MongoDB, store the connection URI in a Databricks Secret Scope. The database
+and default collection are configuration values; a collection can be overridden
+for an individual table. The MongoDB Spark Connector is installed by the job.
+
+```yaml
+domain: mongo_app
+
+connector:
+  type: "mongodb"
+  database: "application"
+  collection: "events"                 # Default collection for connection test
+  secret_scope: "mongodb-app"
+  uri_secret_key: "connection_uri"
+```
+
+In `tables_config.yml`, use the collection as the source, or set `collection`
+explicitly when `table_name` is a logical identifier:
+
+```yaml
+domain: mongo_app
+
+tables:
+  - table_name: "event_records"
+    collection: "events"               # Overrides connector.collection
+    target_table: "events"
+    load_mode: "incremental"
+    incremental_column: "updated_at"
+    write_mode: "unity_catalog"
+    filter_query: '{"status": "active"}'   # Optional MongoDB $match document
+    read_options:
+      aggregation_pipeline:
+        - $project:
+            _id: 0
+            event_id: 1
+            updated_at: 1
+            status: 1
+
+global_options:
+  add_metadata_columns: true
+```
+
+The job uses the MongoDB Spark Connector `10.4.1` with Spark 3.5 / Scala 2.12.
+Add the domain to the `domains` variable in `databricks.yml` to run it through
+the shared ingestion job.
+
+Create the scope and store the URI there (not in the YAML file):
+
+```bash
+databricks secrets create-scope --scope mongodb-app
+databricks secrets put --scope mongodb-app --key connection_uri --string-value "mongodb+srv://<user>:<password>@<cluster>/?retryWrites=true&w=majority"
 ```
 
 #### JDBC Authentication (`auth_type`)

@@ -1,12 +1,12 @@
 resources:
   jobs:
     # -----------------------------------------------------------------------
-    # Workflow générique d'ingestion JDBC -> Databricks.
+    # Workflow générique d'ingestion SQL Server / MongoDB -> Databricks.
     #
-    # Un seul job réutilisable pour TOUTES les bases JDBC : la tâche `for_each`
+    # Un seul job réutilisable pour les sources configurées : la tâche `for_each`
     # itère sur la variable `domains` et exécute le notebook d'ingestion une
     # fois par domaine. Le notebook lit la config du domaine
-    # (config/domains/<name>/) pour se connecter à la base JDBC et écrire, selon
+    # (config/domains/<name>/) pour se connecter à la source configurée et écrire, selon
     # `write_mode`, des fichiers Parquet sur ADLS et/ou des tables Unity Catalog.
     #
     # Ajouter une nouvelle base JDBC = ajouter une entrée dans `domains`
@@ -51,6 +51,8 @@ resources:
               libraries:
                 - pypi:
                     package: "pyyaml"
+                - maven:
+                    coordinates: "org.mongodb.spark:mongo-spark-connector_2.12:10.4.1"
               timeout_seconds: 7200
               max_retries: 2
               retry_on_timeout: true

@@ -78,6 +78,7 @@ try:
     from src.utils.config_loader import ConfigLoader
     from src.utils.secret_manager import SecretManager
     from src.connectors.generic_connector import GenericConnector
+    from src.connectors.mongodb_connector import MongoDBConnector
     from src.ingestors.generic_ingestor import GenericIngestor
     logger.info(" All imports successful")
 except Exception as e:
@@ -123,44 +124,74 @@ try:
     secret_manager = SecretManager(dbutils)
 
     connector_cfg = connector_config['connector']
-    auth_type = connector_cfg.get('auth_type', 'sql')
-    logger.info(f"JDBC auth strategy: {auth_type}")
+    connector_type = connector_cfg.get('type', 'sqlserver').lower()
 
-    # Get credentials (only the keys declared in secret_keys are fetched)
-    credentials = secret_manager.get_sqlserver_credentials(connector_cfg)
+    if connector_type == 'mongodb':
+        connection_uri = secret_manager.get_mongodb_connection_uri(connector_cfg)
+        default_collection = connector_cfg.get('collection')
+        if default_collection:
+            for table_config in enabled_tables:
+                table_config.setdefault('collection', default_collection)
 
-    # For access_token auth, generate the Entra token from the service principal
-    if auth_type == 'access_token' and 'access_token' not in credentials:
-        credentials['access_token'] = secret_manager.get_entra_access_token(
-            client_id=credentials['client_id'],
-            client_secret=credentials['client_secret'],
-            tenant_id=credentials['tenant_id'],
+        test_collection = default_collection
+        if not test_collection and enabled_tables:
+            test_collection = enabled_tables[0].get(
+                'collection', enabled_tables[0]['table_name']
+            )
+
+        connector = MongoDBConnector(
+            spark=spark,
+            connection_uri=connection_uri,
+            database=connector_cfg['database'],
+            default_collection=test_collection,
+        )
+        logger.info("MongoDB connector configured")
+    elif connector_type == 'sqlserver':
+        auth_type = connector_cfg.get('auth_type', 'sql')
+        logger.info(f"JDBC auth strategy: {auth_type}")
+
+        # Get credentials (only the keys declared in secret_keys are fetched)
+        credentials = secret_manager.get_sqlserver_credentials(connector_cfg)
+
+        # For access_token auth, generate the Entra token from the service principal
+        if auth_type == 'access_token' and 'access_token' not in credentials:
+            credentials['access_token'] = secret_manager.get_entra_access_token(
+                client_id=credentials['client_id'],
+                client_secret=credentials['client_secret'],
+                tenant_id=credentials['tenant_id'],
+            )
+
+        # Build JDBC connection
+        jdbc_url = secret_manager.build_jdbc_url(
+            credentials,
+            connector_cfg['jdbc_options']
         )
 
-    # Build JDBC connection
-    jdbc_url = secret_manager.build_jdbc_url(
-        credentials,
-        connector_cfg['jdbc_options']
-    )
-    
-    jdbc_properties = secret_manager.build_jdbc_properties(
-        credentials,
-        connector_cfg['jdbc_options'],
-        auth_type=auth_type
-    )
-    
-    # Create connector
-    connector = GenericConnector(
-        spark=spark,
-        jdbc_url=jdbc_url,
-        jdbc_properties=jdbc_properties,
-        jdbc_options=connector_cfg['jdbc_options']
-    )
+        jdbc_properties = secret_manager.build_jdbc_properties(
+            credentials,
+            connector_cfg['jdbc_options'],
+            auth_type=auth_type
+        )
+
+        connector = GenericConnector(
+            spark=spark,
+            jdbc_url=jdbc_url,
+            jdbc_properties=jdbc_properties,
+            jdbc_options=connector_cfg['jdbc_options']
+        )
+    else:
+        raise ValueError(
+            f"Unsupported connector type '{connector_type}'. "
+            "Supported types: sqlserver, mongodb"
+        )
     
     # Test connection
-    logger.info("Testing SQL Server connection...")
-    connector.test_connection()
-    logger.info(" SQL Server connection successful")
+    logger.info(f"Testing {connector_type} connection...")
+    if connector_type == 'mongodb':
+        connector.test_connection(test_collection)
+    else:
+        connector.test_connection()
+    logger.info(f" {connector_type} connection successful")
 
 except Exception as e:
     logger.error(f" Connector initialization failed: {str(e)}")

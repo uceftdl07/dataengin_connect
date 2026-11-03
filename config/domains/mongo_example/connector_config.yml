@@ -1,0 +1,9 @@
+domain: mongo_example
+description: "Exemple de configuration du connecteur MongoDB"
+
+connector:
+  type: "mongodb"
+  database: "application"
+  collection: "events" # Collection par défaut
+  secret_scope: "mongodb-example"
+  uri_secret_key: "connection_uri"
