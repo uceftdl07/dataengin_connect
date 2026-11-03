@@ -1,6 +1,6 @@
-# MTE Engine — SQL Server, MongoDB & API Ingestion Framework
+# MTE Engine — JDBC, MongoDB, Kafka & API Ingestion Framework
 
-A **metadata-driven, production-ready** ingestion framework for loading data from SQL Server, MongoDB and REST APIs into Databricks (ADLS + Unity Catalog / Delta Lake).
+A **metadata-driven** ingestion framework for loading data from SQL Server/JDBC, MongoDB, Kafka and REST APIs into Databricks (ADLS + Unity Catalog / Delta Lake).
 
 Zero code required to add a new source — everything is driven by YAML configuration files.
 
@@ -12,6 +12,7 @@ Zero code required to add a new source — everything is driven by YAML configur
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [Quick Start](#quick-start)
+- [Detailed ingestion guide (French)](docs/INGESTION_GUIDE_FR.md)
 - [Configuration Reference](#configuration-reference)
 - [Deployment](#deployment)
 - [Running Jobs](#running-jobs)
@@ -778,9 +779,9 @@ cp config/domains/mv/connector_config.yml  config/domains/my_source/
 2. Edit the two YAMLs:
    - Set `domain: my_source` in both files.
    - In `connector_config.yml`, set the JDBC `driver`, `secret_scope` and `secret_keys`
-     for your database. The engine works with any JDBC source — for a non-SQL Server
-     database just point `driver` to the right JDBC driver
-     (e.g. PostgreSQL, Oracle, MySQL) and adjust the URL/options accordingly.
+     for your database. The built-in JDBC URL and authentication currently target
+     SQL Server; other JDBC databases (for example PostgreSQL, Oracle or MySQL)
+     require adapting the connector URL, driver and authentication before use.
    - In `tables_config.yml`, declare the tables to ingest and, per table, the
      `write_mode` (`adls`, `unity_catalog`, or `both`).
 
