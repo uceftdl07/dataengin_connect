@@ -2,13 +2,31 @@
 Configuration loader for YAML files (tables, APIs, connector).
 Production-ready with proper error handling.
 """
-import yaml
 import os
-from typing import Dict, Any, List, Optional
+import re
+from typing import Any, Dict, List, Optional
+
+import yaml
 
 
 class ConfigLoader:
     """Load YAML configuration files for a given domain."""
+
+    _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+    _KAFKA_TOPIC_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+    @staticmethod
+    def _require_non_empty_string(value: Any, field_name: str, *, allow_list: bool = False) -> Any:
+        if value is None:
+            raise ValueError(f"{field_name} is required")
+        if not isinstance(value, str):
+            raise ValueError(f"{field_name} must be a string")
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError(f"{field_name} cannot be empty")
+        if not allow_list and any(char.isspace() for char in cleaned):
+            raise ValueError(f"{field_name} cannot contain whitespace")
+        return cleaned
     
     def __init__(self, project_root: str, domain_name: str):
         """
@@ -150,6 +168,15 @@ class ConfigLoader:
                     raise ValueError(
                         f"Kafka topic configuration is missing '{required}'"
                     )
+            topic_name = self._require_non_empty_string(topic['topic'], "Kafka topic name")
+            target_table = self._require_non_empty_string(topic['target_table'], "Kafka target_table")
+            timestamp_field = self._require_non_empty_string(
+                topic['event_timestamp_field'], "Kafka event_timestamp_field"
+            )
+            if not self._KAFKA_TOPIC_RE.fullmatch(topic_name):
+                raise ValueError(f"Kafka topic '{topic_name}' must be a valid topic name")
+            if not self._IDENTIFIER_RE.fullmatch(target_table):
+                raise ValueError(f"Kafka target table '{target_table}' must be a valid identifier")
             schema = topic['schema']
             if (
                 not isinstance(schema, dict)
@@ -157,9 +184,8 @@ class ConfigLoader:
                 or not isinstance(schema.get('fields'), list)
             ):
                 raise ValueError(
-                    f"Kafka topic '{topic['topic']}' schema must be a Spark struct"
+                    f"Kafka topic '{topic_name}' schema must be a Spark struct"
                 )
-            timestamp_field = topic['event_timestamp_field']
             timestamp_schema = next(
                 (
                     field
@@ -170,7 +196,7 @@ class ConfigLoader:
             )
             if not timestamp_schema or timestamp_schema.get('type') != 'timestamp':
                 raise ValueError(
-                    f"Kafka topic '{topic['topic']}' event_timestamp_field "
+                    f"Kafka topic '{topic_name}' event_timestamp_field "
                     "must name a top-level timestamp schema field"
                 )
 
