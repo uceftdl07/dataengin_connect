@@ -1,0 +1,12 @@
+domain: kafka_example
+description: "Exemple de configuration du connecteur Kafka"
+
+connector:
+  type: "kafka"
+  bootstrap_servers: "broker1.example.com:9093,broker2.example.com:9093"
+  secret_scope: "kafka-example"
+  options:
+    kafka.security.protocol: "SASL_SSL"
+    kafka.sasl.mechanism: "PLAIN"
+  secret_options:
+    kafka.sasl.jaas.config: "sasl_jaas_config"

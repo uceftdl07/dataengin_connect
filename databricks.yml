@@ -2,13 +2,10 @@ bundle:
   name: jdbc-ingestion-engine
 
 # ---------------------------------------------------------------------------
-# Moteur générique d'ingestion de sources JDBC (SQL Server et autres bases
-# JDBC) vers Databricks : écriture Parquet sur ADLS et/ou création de tables
-# Unity Catalog (Delta). Le comportement est piloté par la configuration YAML
-# de chaque domaine (config/domains/<domain>/).
+# Moteur générique d'ingestion SQL Server, MongoDB et Kafka vers Databricks.
 #
-# Périmètre : intégration des sources JDBC uniquement (la partie API est
-# volontairement hors périmètre de ce bundle).
+# Le comportement des ingestions est piloté par la configuration YAML de
+# chaque domaine (config/domains/<domain>/).
 # ---------------------------------------------------------------------------
 
 variables:
@@ -46,6 +43,11 @@ variables:
         adls_base_path: "abfss://mv-bronze@yourstorageaccount.dfs.core.windows.net"
       - name: "wolf"
         adls_base_path: "abfss://wolf-bronze@yourstorageaccount.dfs.core.windows.net"
+
+  kafka_domains:
+    description: "Kafka domains enabled for the scheduled previous-day ingestion"
+    type: complex
+    default: []
 
 include:
   - resources/*.yml

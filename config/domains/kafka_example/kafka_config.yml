@@ -1,0 +1,34 @@
+domain: kafka_example
+description: "Topics Kafka à ingérer quotidiennement"
+timezone: "Europe/Paris"
+
+topics:
+  - topic: "events"
+    target_table: "events"
+    enabled: true
+    event_timestamp_field: "event_timestamp"
+    schema:
+      type: "struct"
+      fields:
+        - name: "event_id"
+          type: "string"
+          nullable: true
+          metadata: {}
+        - name: "event_timestamp"
+          type: "timestamp"
+          nullable: true
+          metadata: {}
+        - name: "event_type"
+          type: "string"
+          nullable: true
+          metadata: {}
+        - name: "amount"
+          type: "double"
+          nullable: true
+          metadata: {}
+    source_options:
+      minPartitions: "4"
+
+global_options:
+  error_handling:
+    on_error: "fail"

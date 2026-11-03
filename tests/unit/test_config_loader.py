@@ -57,6 +57,48 @@ class TestConfigLoader:
         assert config['domain'] == 'test_domain'
         assert 'connector' in config
         assert config['connector']['type'] == 'sqlserver'
+
+    def test_load_kafka_config_and_enabled_topics(self, tmp_path, temp_config_dir):
+        import yaml
+
+        config = {
+            'domain': 'test_domain',
+            'topics': [
+                {'topic': 'events', 'target_table': 'events',
+                 'event_timestamp_field': 'event_timestamp',
+                 'schema': {'type': 'struct', 'fields': [
+                     {'name': 'event_timestamp', 'type': 'timestamp',
+                      'nullable': True, 'metadata': {}},
+                 ]}, 'enabled': True},
+                {'topic': 'disabled', 'target_table': 'disabled',
+                 'event_timestamp_field': 'event_timestamp',
+                 'schema': {'type': 'struct', 'fields': [
+                     {'name': 'event_timestamp', 'type': 'timestamp',
+                      'nullable': True, 'metadata': {}},
+                 ]}, 'enabled': False},
+            ],
+        }
+        with open(temp_config_dir / 'kafka_config.yml', 'w') as stream:
+            yaml.safe_dump(config, stream)
+
+        loader = ConfigLoader(tmp_path, 'test_domain')
+
+        assert len(loader.load_kafka_config()['topics']) == 2
+        assert [topic['topic'] for topic in loader.get_enabled_kafka_topics()] == [
+            'events'
+        ]
+
+    def test_load_kafka_config_requires_topic_fields(self, tmp_path, temp_config_dir):
+        import yaml
+
+        with open(temp_config_dir / 'kafka_config.yml', 'w') as stream:
+            yaml.safe_dump(
+                {'domain': 'test_domain', 'topics': [{'topic': 'events'}]},
+                stream,
+            )
+
+        with pytest.raises(ValueError, match="missing 'target_table'"):
+            ConfigLoader(tmp_path, 'test_domain').load_kafka_config()
     
     def test_get_enabled_tables(self, tmp_path, temp_yaml_files):
         """Test getting only enabled tables."""

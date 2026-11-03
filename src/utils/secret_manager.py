@@ -70,6 +70,56 @@ class SecretManager:
                 f"Failed to retrieve MongoDB connection URI from scope '{scope}' "
                 f"using key '{secret_key}': {str(e)}"
             ) from e
+
+    def get_kafka_options(self, connector_config: Dict[str, Any]) -> Dict[str, str]:
+        """Resolve Kafka consumer options, including secrets stored by option name."""
+        options = connector_config.get('options', {})
+        secret_options = connector_config.get('secret_options', {})
+        scope = connector_config.get('secret_scope')
+
+        if not isinstance(options, dict) or not isinstance(secret_options, dict):
+            raise ValueError("'options' and 'secret_options' must be mappings")
+        if secret_options and not scope:
+            raise ValueError("Kafka connector with 'secret_options' requires 'secret_scope'")
+
+        resolved = {}
+        for option, value in options.items():
+            if not isinstance(option, str) or not option.startswith('kafka.'):
+                raise ValueError(
+                    f"Kafka consumer option '{option}' must start with 'kafka.'"
+                )
+            if option == "kafka.bootstrap.servers":
+                raise ValueError(
+                    "'kafka.bootstrap.servers' must be configured as "
+                    "'bootstrap_servers'"
+                )
+            resolved[option] = str(value)
+
+        for option, secret_key in secret_options.items():
+            if (
+                not isinstance(option, str)
+                or not option.startswith('kafka.')
+                or not secret_key
+            ):
+                raise ValueError(
+                    "Kafka secret options must map 'kafka.*' options to secret keys"
+                )
+            if option == "kafka.bootstrap.servers":
+                raise ValueError(
+                    "'kafka.bootstrap.servers' must be configured as "
+                    "'bootstrap_servers'"
+                )
+            try:
+                resolved[option] = self.dbutils.secrets.get(
+                    scope=scope, key=secret_key
+                )
+            except Exception as e:
+                raise ValueError(
+                    f"Failed to retrieve Kafka secret '{secret_key}' "
+                    f"from scope '{scope}': {str(e)}"
+                ) from e
+
+        return resolved
     
     def get_api_credentials(
         self,

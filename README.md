@@ -43,6 +43,16 @@ Zero code required to add a new source — everything is driven by YAML configur
 | Destination | Same ADLS Parquet and/or Unity Catalog Delta output as SQL Server |
 | Credentials | MongoDB URI retrieved from a Databricks Secret Scope |
 
+### Kafka Previous-Day Ingestion
+| Capability | Details |
+|---|---|
+| Execution | Scheduled daily batch job; optional `run_date` widget for backfills |
+| Parsing | JSON payload parsed using a Spark schema declared per topic in `kafka_config.yml` |
+| Event date | Configured payload timestamp first; Kafka record timestamp if that field is null |
+| Idempotency | Atomic Delta `replaceWhere` for the requested event date, without changing other dates |
+| Targets | Creates a Delta table when absent, or replaces that date in an existing Delta table with a matching schema |
+| Authentication | Kafka consumer options and secret references in `connector_config.yml` / Databricks Secret Scopes |
+
 ### REST API Ingestion
 | Capability | Details |
 |---|---|
@@ -112,30 +122,37 @@ Zero code required to add a new source — everything is driven by YAML configur
 MTE_Engine/
 ├── databricks.yml                      # Asset Bundle — name, `domains` list & environments
 ├── resources/
-│   └── jdbc_ingestion.job.yml          # Shared SQL Server / MongoDB job (for_each over domains)
+│   ├── jdbc_ingestion.job.yml          # Shared SQL Server / MongoDB job
+│   └── kafka_ingestion.job.yml         # Scheduled previous-day Kafka job
 ├── config/
 │   └── domains/
 │       ├── mv/
 │       │   ├── tables_config.yml       # SQL Server tables for domain MV
 │       │   ├── apis_config.yml         # REST APIs for domain MV
 │       │   └── connector_config.yml    # Secret scopes & JDBC options
-│       └── wolf/
-│           ├── tables_config.yml
-│           ├── apis_config.yml
-│           └── connector_config.yml
+│       ├── wolf/
+│       │   ├── tables_config.yml
+│       │   ├── apis_config.yml
+│       │   └── connector_config.yml
+│       └── kafka_example/
+│           ├── connector_config.yml    # Brokers, Kafka options & secret references
+│           └── kafka_config.yml        # Topics, payload schemas & target tables
 ├── src/
 │   ├── connectors/
 │   │   ├── generic_connector.py        # SQL Server JDBC connector
 │   │   ├── mongodb_connector.py        # MongoDB Spark connector
+│   │   ├── kafka_batch_connector.py    # Bounded Kafka offset-range reader
 │   │   └── generic_api_connector.py    # REST API connector (auth + pagination)
 │   ├── ingestors/
-│   │   ├── generic_ingestor.py         # SQL → ADLS / Unity Catalog
-│   │   └── generic_api_ingestor.py     # API → ADLS / Unity Catalog
+│   │   ├── generic_ingestor.py         # SQL / Mongo → ADLS / Unity Catalog
+│   │   ├── generic_api_ingestor.py     # API → ADLS / Unity Catalog
+│   │   └── kafka_daily_ingestor.py     # Previous event date → Delta
 │   └── utils/
 │       ├── config_loader.py            # YAML config loader
 │       └── secret_manager.py           # Databricks secrets helper
 ├── notebooks/
 │   ├── main_ingestion.py               # Entry point — SQL Server
+│   ├── main_kafka_ingestion.py         # Entry point — previous-day Kafka
 │   └── main_api_ingestion.py           # Entry point — REST APIs
 ├── tests/
 │   ├── conftest.py                     # Shared fixtures (Spark, mocks, configs)
@@ -509,6 +526,74 @@ databricks secrets create-scope --scope mongodb-app
 databricks secrets put --scope mongodb-app --key connection_uri --string-value "mongodb+srv://<user>:<password>@<cluster>/?retryWrites=true&w=majority"
 ```
 
+### Kafka daily ingestion
+
+The Kafka job reads the topic's retained offsets (`earliest` to the current
+`latest`) and filters records by event date. This ensures late-arriving messages
+whose payload timestamp is yesterday are not missed, but means the topic must
+retain the period you need and the job scans retained records on each run.
+`event_timestamp_field` must be a top-level `timestamp` in the configured JSON
+schema. If its value is null, the Kafka record timestamp is used. The job
+defaults to yesterday in the configured timezone (`Europe/Paris` in the example);
+set `run_date` to `YYYY-MM-DD` for a backfill.
+
+The output table must be a Delta table if it already exists. Its schema must
+match the configured JSON schema. The job can also create the table if it does
+not exist. Reruns atomically replace only the requested event date using Delta
+`replaceWhere`, leaving rows from other dates unchanged.
+
+```yaml
+# config/domains/kafka_example/connector_config.yml
+domain: kafka_example
+connector:
+  type: kafka
+  bootstrap_servers: "broker1.example.com:9093,broker2.example.com:9093"
+  secret_scope: "kafka-example"
+  options:
+    kafka.security.protocol: "SASL_SSL"
+    kafka.sasl.mechanism: "PLAIN"
+  secret_options:
+    kafka.sasl.jaas.config: "sasl_jaas_config"
+```
+
+```yaml
+# config/domains/kafka_example/kafka_config.yml
+domain: kafka_example
+timezone: "Europe/Paris"
+topics:
+  - topic: "events"
+    target_table: "events"
+    event_timestamp_field: "event_timestamp"
+    schema:
+      type: "struct"
+      fields:
+        - name: "event_id"
+          type: "string"
+          nullable: true
+          metadata: {}
+        - name: "event_timestamp"
+          type: "timestamp"
+          nullable: true
+          metadata: {}
+        - name: "event_type"
+          type: "string"
+          nullable: true
+          metadata: {}
+```
+
+Store the complete JAAS configuration as a secret instead of putting credentials
+in YAML, for example in secret scope `kafka-example`, key `sasl_jaas_config`.
+Add the domain to `kafka_domains` in `databricks.yml` (and the relevant target)
+to enable it. The daily job is deployed paused; unpause it after setting the
+broker, secret, target catalog/schema, and domain list. The Kafka Spark connector
+is provisioned by the job for Spark 3.5 / Scala 2.12.
+
+```yaml
+# databricks.yml (default list or target-specific variables)
+kafka_domains:
+  - name: "kafka_example"
+```
+
 #### JDBC Authentication (`auth_type`)
 
 Authentication is chosen **per data source** via `auth_type`, so a heterogeneous
@@ -611,9 +696,9 @@ The bundle defines three environments in `databricks.yml`:
 
 | Target | Mode | Catalog | Schedule |
 |--------|------|---------|----------|
-| `dev` | development | `dev_bronze` | manual |
-| `staging` | development | `staging_bronze` | manual |
-| `prod` | production | `bronze` | daily (02:00 CET) |
+| `dev` | development | `dev_bronze` | JDBC manual; Kafka daily job paused |
+| `staging` | development | `staging_bronze` | JDBC manual; Kafka daily job paused |
+| `prod` | production | `bronze` | JDBC daily (02:00); Kafka daily job paused |
 
 ```bash
 # Validate bundle syntax
@@ -625,7 +710,7 @@ databricks bundle deploy -t staging
 databricks bundle deploy -t prod
 ```
 
-> **Note**: a Databricks Asset Bundle deploys **all included resources** from `resources/*.yml`. This engine ships a **single generic job** (`jdbc_ingestion`) that fans out over the `domains` variable, so onboarding a new JDBC source does **not** require a new job — see [Onboarding a New JDBC Source](#onboarding-a-new-jdbc-source).
+> **Note**: a Databricks Asset Bundle deploys **all included resources** from `resources/*.yml`. The JDBC/Mongo job fans out over `domains`; the Kafka daily job fans out over `kafka_domains` and is deployed paused.
 
 ### CI/CD (GitHub Actions)
 

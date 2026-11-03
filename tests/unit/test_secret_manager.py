@@ -29,6 +29,35 @@ class TestSecretManager:
 
         with pytest.raises(ValueError, match="secret_scope.*uri_secret_key"):
             manager.get_mongodb_connection_uri({})
+
+    def test_get_kafka_options_resolves_secret_options(self, mock_dbutils):
+        manager = SecretManager(mock_dbutils)
+        mock_dbutils.secrets.get.side_effect = None
+        mock_dbutils.secrets.get.return_value = "jaas-config"
+
+        options = manager.get_kafka_options(
+            {
+                "secret_scope": "kafka-test",
+                "options": {"kafka.security.protocol": "SASL_SSL"},
+                "secret_options": {
+                    "kafka.sasl.jaas.config": "kafka_jaas"
+                },
+            }
+        )
+
+        assert options == {
+            "kafka.security.protocol": "SASL_SSL",
+            "kafka.sasl.jaas.config": "jaas-config",
+        }
+        mock_dbutils.secrets.get.assert_called_once_with(
+            scope="kafka-test", key="kafka_jaas"
+        )
+
+    def test_get_kafka_options_rejects_unprefixed_option(self, mock_dbutils):
+        manager = SecretManager(mock_dbutils)
+
+        with pytest.raises(ValueError, match="must start with 'kafka.'"):
+            manager.get_kafka_options({"options": {"security.protocol": "SASL_SSL"}})
     
     def test_get_sqlserver_credentials(self, mock_dbutils, sample_connector_config):
         """Test retrieving SQL Server credentials."""

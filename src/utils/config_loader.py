@@ -121,6 +121,65 @@ class ConfigLoader:
             raise ValueError("No 'connector' section in connector_config.yml")
         
         return config
+
+    def load_kafka_config(self) -> Dict[str, Any]:
+        """Load and validate Kafka topics configured for daily ingestion."""
+        config_file = os.path.join(self.domain_path, "kafka_config.yml")
+
+        if not os.path.exists(config_file):
+            raise FileNotFoundError(f"Kafka config not found: {config_file}")
+
+        with open(config_file, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+
+        if not config:
+            raise ValueError(f"Empty configuration file: {config_file}")
+        if config.get('domain') != self.domain_name:
+            raise ValueError(
+                f"Domain mismatch in kafka_config.yml: expected "
+                f"{self.domain_name}, got {config.get('domain')}"
+            )
+        if not isinstance(config.get('topics'), list):
+            raise ValueError("No 'topics' list in kafka_config.yml")
+
+        for topic in config['topics']:
+            if not isinstance(topic, dict):
+                raise ValueError("Each Kafka topic configuration must be a mapping")
+            for required in ('topic', 'target_table', 'event_timestamp_field', 'schema'):
+                if not topic.get(required):
+                    raise ValueError(
+                        f"Kafka topic configuration is missing '{required}'"
+                    )
+            schema = topic['schema']
+            if (
+                not isinstance(schema, dict)
+                or schema.get('type') != 'struct'
+                or not isinstance(schema.get('fields'), list)
+            ):
+                raise ValueError(
+                    f"Kafka topic '{topic['topic']}' schema must be a Spark struct"
+                )
+            timestamp_field = topic['event_timestamp_field']
+            timestamp_schema = next(
+                (
+                    field
+                    for field in schema['fields']
+                    if isinstance(field, dict) and field.get('name') == timestamp_field
+                ),
+                None,
+            )
+            if not timestamp_schema or timestamp_schema.get('type') != 'timestamp':
+                raise ValueError(
+                    f"Kafka topic '{topic['topic']}' event_timestamp_field "
+                    "must name a top-level timestamp schema field"
+                )
+
+        return config
+
+    def get_enabled_kafka_topics(self) -> List[Dict[str, Any]]:
+        """Return enabled topic configurations."""
+        config = self.load_kafka_config()
+        return [topic for topic in config['topics'] if topic.get('enabled', True)]
     
     def get_enabled_tables(self) -> List[Dict[str, Any]]:
         """
